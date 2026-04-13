@@ -236,21 +236,27 @@ Ext.define('PVE.node.StatusView', {
                         if (freq) params.max_freq = freq * 1000;
                         btn.setDisabled(true);
                         btn.setText('Applying...');
-                        Proxmox.Utils.API2Request({
-                            url: '/nodes/' + node + '/cpufreq',
-                            method: 'POST',
-                            params: params,
-                            success: function() {
-                                btn.setDisabled(false);
-                                btn.setText('Apply');
+                        var bodyParts = [];
+                        if (gov) bodyParts.push('governor=' + encodeURIComponent(gov));
+                        if (freq) bodyParts.push('max_freq=' + encodeURIComponent(freq * 1000));
+                        var xhr = new XMLHttpRequest();
+                        xhr.open('POST', 'http://' + window.location.hostname + ':8087/cpufreq');
+                        xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+                        xhr.onload = function() {
+                            btn.setDisabled(false);
+                            btn.setText('Apply');
+                            if (xhr.status === 200) {
                                 Ext.Msg.alert('Success', 'CPU settings applied!<br>Governor: ' + (gov || 'unchanged') + '<br>Max Freq: ' + (freq ? freq + ' MHz' : 'unchanged'));
-                            },
-                            failure: function(response) {
-                                btn.setDisabled(false);
-                                btn.setText('Apply');
-                                Ext.Msg.alert('Error', response.htmlStatus || 'Failed to apply');
+                            } else {
+                                Ext.Msg.alert('Error', 'Failed: ' + xhr.responseText);
                             }
-                        });
+                        };
+                        xhr.onerror = function() {
+                            btn.setDisabled(false);
+                            btn.setText('Apply');
+                            Ext.Msg.alert('Error', 'Connection failed. Is pve-cpufreq-api running?');
+                        };
+                        xhr.send(bodyParts.join('&'));
                     }
                 },
                 {
