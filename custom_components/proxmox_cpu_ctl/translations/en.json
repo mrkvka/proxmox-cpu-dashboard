@@ -1,0 +1,53 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Proxmox CPU Dashboard",
+        "description": "Connect to the Proxmox CPU Dashboard API.",
+        "data": {
+          "host": "Proxmox host (IP or hostname)",
+          "port": "API port",
+          "scan_interval": "Scan interval (seconds)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach the Proxmox CPU API. Make sure pve-cpufreq-api.service is running on the target host."
+    },
+    "abort": {
+      "already_configured": "This Proxmox host is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options",
+        "data": {
+          "scan_interval": "Scan interval (seconds)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "cpu_temperature": {"name": "CPU Temperature"},
+      "nvme_composite_temperature": {"name": "NVMe Composite Temperature"},
+      "nvme_sensor1_temperature": {"name": "NVMe Sensor 1 Temperature"},
+      "cpu_frequency": {"name": "CPU Frequency"},
+      "cpu_max_frequency": {"name": "CPU Max Frequency"},
+      "cpu_governor": {"name": "CPU Governor"},
+      "cpu_power": {"name": "CPU Power"}
+    },
+    "select": {
+      "cpu_governor": {"name": "CPU Governor"}
+    },
+    "number": {
+      "cpu_max_frequency": {"name": "CPU Max Frequency"}
+    },
+    "button": {
+      "preset_performance": {"name": "Preset Performance"},
+      "preset_balanced": {"name": "Preset Balanced"},
+      "preset_powersave": {"name": "Preset Powersave"}
+    }
+  }
+}

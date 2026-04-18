@@ -37,7 +37,20 @@ echo "    Backups saved with suffix: bak_${TIMESTAMP}"
 echo "[*] Installing helper scripts..."
 cp "$SRC/pve-hwinfo.sh" /usr/local/bin/pve-hwinfo.sh
 cp "$SRC/pve-cpufreq-set.sh" /usr/local/bin/pve-cpufreq-set.sh
-chmod +x /usr/local/bin/pve-hwinfo.sh /usr/local/bin/pve-cpufreq-set.sh
+cp "$SRC/pve-cpufreq-api.py" /usr/local/bin/pve-cpufreq-api.py
+chmod +x /usr/local/bin/pve-hwinfo.sh /usr/local/bin/pve-cpufreq-set.sh /usr/local/bin/pve-cpufreq-api.py
+
+# Install and start the API service
+echo "[*] Installing pve-cpufreq-api.service..."
+cp "$SRC/pve-cpufreq-api.service" /etc/systemd/system/pve-cpufreq-api.service
+systemctl daemon-reload
+systemctl enable --now pve-cpufreq-api.service
+sleep 1
+if systemctl is-active --quiet pve-cpufreq-api.service; then
+    echo "    OK - pve-cpufreq-api running on :8087"
+else
+    echo "    WARNING: service failed to start. Run: journalctl -u pve-cpufreq-api -n 50"
+fi
 
 # Test hwinfo script
 echo "[*] Testing pve-hwinfo.sh..."
@@ -112,4 +125,12 @@ echo "   - Controls (governor dropdown, freq input, presets)"
 echo "   - Fans (if available)"
 echo ""
 echo " Press Ctrl+Shift+R in browser to force reload."
+echo ""
+echo " API endpoints:"
+echo "   GET  http://$(hostname -I | awk '{print $1}'):8087/health"
+echo "   GET  http://$(hostname -I | awk '{print $1}'):8087/status"
+echo "   POST http://$(hostname -I | awk '{print $1}'):8087/cpufreq"
+echo ""
+echo " Home Assistant: add this repo as a HACS Custom Repository,"
+echo " or copy custom_components/proxmox_cpu_ctl/ to HA's /config/custom_components/"
 echo ""

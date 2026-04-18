@@ -1,73 +1,170 @@
 # Proxmox CPU Dashboard
 
-CPU frequency monitoring & control panel for Proxmox VE Summary page.
-
-![screenshot](screenshot.png)
+CPU frequency monitoring & control for Proxmox VE, with a **Home Assistant integration** for automations (UPS, temperature, schedules).
 
 ## Features
 
-- **Temperature monitoring** - Color-coded CPU and NVMe temperatures (green/orange/red)
-- **CPU frequency info** - Current governor, frequency range, per-core frequencies
-- **Live controls** - Change CPU governor and max frequency from the web UI
-- **Presets** - Quick buttons: Performance / Balanced / Powersave
-- **Fan monitoring** - RPM display (if sensors are available)
+### Proxmox Summary UI
+- Color-coded CPU/NVMe temperatures on the node Summary page
+- Governor, current/min/max frequency, per-core frequencies
+- Change governor and max frequency from the web UI
+- Presets: Performance / Balanced / Powersave
+- Fan speed (if sensors are exposed)
 
-## Requirements
+### Home Assistant integration
+- Auto-discovered sensors: temps, frequency, governor, power (RAPL)
+- `select.cpu_governor` — change governor from HA
+- `number.cpu_max_frequency` — slider for max frequency (MHz)
+- 3 preset buttons
+- Works with automations: UPS on battery → switch to powersave, and more
 
-- Proxmox VE 8.x or 9.x
-- `lm-sensors` package (installed automatically)
-- Root access to PVE host
+## Architecture
 
-## Installation
+```
+┌───────────────────────┐     HTTP :8087     ┌─────────────────────┐
+│  Proxmox VE host      │ ◀────────────────▶ │  Home Assistant     │
+│  pve-cpufreq-api.py   │     GET  /status   │  proxmox_cpu_ctl    │
+│  pve-hwinfo.sh        │     GET  /health   │  (custom component) │
+│  pve-cpufreq-set.sh   │     POST /cpufreq  │                     │
+│  + JS Summary patch   │                    │                     │
+└───────────────────────┘                    └─────────────────────┘
+```
+
+---
+
+## 1. Install on Proxmox
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/proxmox-cpu-dashboard.git
+git clone https://github.com/mrkvka/proxmox-cpu-dashboard.git
 cd proxmox-cpu-dashboard
 bash install.sh
 ```
 
-Then open Proxmox web UI, go to **Node -> Summary**, and press **Ctrl+Shift+R**.
+Then open Proxmox web UI → Node → Summary, press **Ctrl+Shift+R**.
 
-## Uninstallation
+The installer sets up:
+- `/usr/local/bin/pve-hwinfo.sh` (data collection)
+- `/usr/local/bin/pve-cpufreq-set.sh` (change governor/frequency)
+- `/usr/local/bin/pve-cpufreq-api.py` + systemd service on port 8087
+- Patches to `/usr/share/perl5/PVE/API2/Nodes.pm` (exposes thermal data)
+- JS override at `/usr/share/pve-manager/js/pve_node_summary.js`
 
-```bash
-bash uninstall.sh
+Backups of all original files are saved with `bak_<timestamp>` suffix.
+
+---
+
+## 2. Install Home Assistant integration
+
+### Option A — HACS (Custom Repository)
+1. In HACS → **Integrations** → three-dot menu → **Custom repositories**
+2. Add: `https://github.com/mrkvka/proxmox-cpu-dashboard`, category **Integration**
+3. Install **Proxmox CPU Dashboard**, restart HA
+
+### Option B — manual
+Copy `custom_components/proxmox_cpu_ctl/` to `/config/custom_components/` in HA and restart.
+
+### Configure
+**Settings → Devices & Services → + Add Integration → Proxmox CPU Dashboard**
+- **Host**: IP of Proxmox (e.g. `192.168.1.200`)
+- **Port**: `8087`
+- **Scan interval**: `15`
+
+A new device appears with ~12 entities.
+
+---
+
+## Entities created
+
+| Entity | Type | Description |
+|---|---|---|
+| `sensor.proxmox_cpu_temperature` | sensor | CPU Tctl °C |
+| `sensor.proxmox_nvme_composite_temperature` | sensor | NVMe composite °C |
+| `sensor.proxmox_nvme_sensor_1_temperature` | sensor | NVMe sensor 1 °C |
+| `sensor.proxmox_cpu_frequency` | sensor | current MHz |
+| `sensor.proxmox_cpu_max_frequency` | sensor | scaling_max_freq MHz |
+| `sensor.proxmox_cpu_governor` | sensor | current governor |
+| `sensor.proxmox_cpu_power` | sensor | CPU power W (RAPL) |
+| `select.proxmox_cpu_governor` | select | change governor |
+| `number.proxmox_cpu_max_frequency` | number | slider, MHz |
+| `button.proxmox_cpu_preset_performance` | button | Performance preset |
+| `button.proxmox_cpu_preset_balanced` | button | Balanced preset |
+| `button.proxmox_cpu_preset_powersave` | button | Powersave preset |
+
+---
+
+## Example automations
+
+**UPS on battery → Powersave**
+```yaml
+alias: "UPS on battery → Powersave"
+trigger:
+  - platform: state
+    entity_id: switch.your_smart_socket
+    to: "unavailable"
+    for: "00:00:30"
+action:
+  - service: button.press
+    target:
+      entity_id: button.proxmox_cpu_preset_powersave
 ```
 
-All original files are restored from backups created during installation.
+**High temperature → throttle CPU**
+```yaml
+alias: "CPU too hot → Powersave"
+trigger:
+  - platform: numeric_state
+    entity_id: sensor.proxmox_cpu_temperature
+    above: 80
+action:
+  - service: button.press
+    target:
+      entity_id: button.proxmox_cpu_preset_powersave
+```
 
-## How It Works
+**Night schedule**
+```yaml
+alias: "Nighttime: Balanced"
+trigger:
+  - platform: time
+    at: "00:00:00"
+action:
+  - service: button.press
+    target:
+      entity_id: button.proxmox_cpu_preset_balanced
+```
 
-### Backend
-- `pve-hwinfo.sh` - Collects sensor data + CPU frequency info as JSON
-- `pve-cpufreq-set.sh` - Safely applies governor/frequency changes with validation
-- `Nodes.pm` patch - Exposes hardware data via API + adds POST endpoint for CPU control
+---
 
-### Frontend
-- `pve_node_summary.js` - ExtJS override that adds monitoring widgets and control panel to the node Summary page
-
-## CPU Governor Modes
+## CPU Governors
 
 | Governor | Description |
 |----------|-------------|
-| `performance` | Always run at max frequency |
-| `conservative` | Gradually increase frequency under load |
-| `ondemand` | Quickly jump to max frequency under load |
-| `powersave` | Always run at min frequency |
-| `schedutil` | Kernel scheduler-driven frequency scaling |
+| `performance` | Always max frequency |
+| `conservative` | Ramp up gradually under load |
+| `ondemand` | Jump to max under load |
+| `powersave` | Always min frequency |
+| `schedutil` | Scheduler-driven |
 
-## Notes
+---
 
-- Changes via the UI are applied immediately but **do not persist across reboots**
-- For persistent settings, create a systemd service (see install script comments)
-- PVE updates may overwrite `Nodes.pm` and `index.html.tpl` - re-run `install.sh` after updates
-- Fan control is display-only (hardware-dependent, most mini-PCs manage fans via BIOS)
+## Uninstall
 
-## Tested On
+```bash
+bash uninstall.sh          # on Proxmox
+```
 
-- Proxmox VE 9.1.1
-- AMD Ryzen 7 4800H (mini-PC)
-- Should work with any AMD/Intel CPU that supports cpufreq scaling
+Remove HA integration from Settings → Devices & Services, then delete `custom_components/proxmox_cpu_ctl/`.
+
+---
+
+## Security
+
+The API listens on **0.0.0.0:8087** without authentication. This is fine in a trusted LAN but **do not expose it to the internet**. Add a firewall rule if needed:
+```bash
+iptables -A INPUT -p tcp --dport 8087 ! -s 192.168.1.0/24 -j DROP
+```
+
+---
 
 ## License
 
