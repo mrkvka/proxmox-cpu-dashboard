@@ -174,10 +174,19 @@ Ext.define('PVE.node.StatusView', {
                     coreFreqs.forEach(function(f) { coreGroups[f] = (coreGroups[f] || 0) + 1; });
                     var coreStr = Object.entries(coreGroups).map(function(e) { return e[1] + 'x ' + e[0] + ' MHz'; }).join(', ');
 
+                    // Active CPUs — highlight in orange if less than total (degraded / UPS mode)
+                    var cpusStr = '';
+                    if (data.cpus && data.cpus.total) {
+                        var on = data.cpus.online, tot = data.cpus.total;
+                        var color = on < tot ? 'orange' : '#0a0';
+                        cpusStr = ' &nbsp;|&nbsp; <b>Active CPUs:</b> <span style="color:' + color + ';font-weight:bold">' + on + ' / ' + tot + '</span>';
+                    }
+
                     return '<b>Governor:</b> <span style="color:#00617f;font-weight:bold">' + cf.governor + '</span>' +
                         ' &nbsp;|&nbsp; <b>Current:</b> ' + freqMHz(cf.scaling_cur_freq) +
                         ' &nbsp;|&nbsp; <b>Range:</b> ' + freqMHz(cf.scaling_min_freq) + ' - ' + freqMHz(cf.scaling_max_freq) +
                         ' &nbsp;|&nbsp; <b>HW Limits:</b> ' + freqMHz(cf.cpuinfo_min_freq) + ' - ' + freqMHz(cf.cpuinfo_max_freq) +
+                        cpusStr +
                         '<br><b>Cores:</b> ' + coreStr;
                 } catch(e) {
                     return 'N/A';

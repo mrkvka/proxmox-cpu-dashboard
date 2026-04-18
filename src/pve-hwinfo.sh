@@ -15,6 +15,13 @@ for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq; do
   val=$(cat "$f" 2>/dev/null)
   [ -n "$val" ] && CORE_FREQS="${CORE_FREQS}${CORE_FREQS:+,}$val"
 done
+# Count total and online CPUs. cpu0 usually has no "online" file (always on).
+CPUS_TOTAL=$(ls -d /sys/devices/system/cpu/cpu[0-9]* 2>/dev/null | wc -l)
+CPUS_ONLINE=0
+for f in /sys/devices/system/cpu/cpu[0-9]*/online; do
+  [ "$(cat "$f" 2>/dev/null)" = "1" ] && CPUS_ONLINE=$((CPUS_ONLINE + 1))
+done
+[ ! -f /sys/devices/system/cpu/cpu0/online ] && CPUS_ONLINE=$((CPUS_ONLINE + 1))
 # Remove outer braces from sensors JSON to embed it
 SENSORS_INNER=$(echo "$SENSORS" | sed 's/^{//;s/}$//')
-echo "{${SENSORS_INNER:+${SENSORS_INNER},}\"cpufreq\":{\"governor\":\"${GOV}\",\"available_governors\":[${GOVS_JSON}],\"scaling_cur_freq\":${CUR_FREQ:-0},\"scaling_min_freq\":${MIN_FREQ:-0},\"scaling_max_freq\":${MAX_FREQ:-0},\"cpuinfo_min_freq\":${CPUINFO_MIN:-0},\"cpuinfo_max_freq\":${CPUINFO_MAX:-0},\"available_frequencies\":[${FREQS_JSON:-}],\"per_core_freq\":[${CORE_FREQS}]}}"
+echo "{${SENSORS_INNER:+${SENSORS_INNER},}\"cpufreq\":{\"governor\":\"${GOV}\",\"available_governors\":[${GOVS_JSON}],\"scaling_cur_freq\":${CUR_FREQ:-0},\"scaling_min_freq\":${MIN_FREQ:-0},\"scaling_max_freq\":${MAX_FREQ:-0},\"cpuinfo_min_freq\":${CPUINFO_MIN:-0},\"cpuinfo_max_freq\":${CPUINFO_MAX:-0},\"available_frequencies\":[${FREQS_JSON:-}],\"per_core_freq\":[${CORE_FREQS}]},\"cpus\":{\"online\":${CPUS_ONLINE},\"total\":${CPUS_TOTAL}}}"
