@@ -24,6 +24,31 @@ import urllib.parse
 
 HWINFO_SCRIPT = "/usr/local/bin/pve-hwinfo.sh"
 SETFREQ_SCRIPT = "/usr/local/bin/pve-cpufreq-set.sh"
+SETCPUS_SCRIPT = "/usr/local/bin/pve-cpus-set.sh"
+
+
+def _count_cpus():
+    """Return (online_count, total_count) by scanning /sys/devices/system/cpu/."""
+    import glob as _g
+    total = 0
+    online = 0
+    has_cpu0 = os.path.isfile("/sys/devices/system/cpu/cpu0/online")
+    for path in _g.glob("/sys/devices/system/cpu/cpu[0-9]*/online"):
+        total += 1
+        try:
+            with open(path) as f:
+                if f.read().strip() == "1":
+                    online += 1
+        except Exception:
+            pass
+    # Directories without online file (usually cpu0) are always online
+    all_dirs = _g.glob("/sys/devices/system/cpu/cpu[0-9]*")
+    total_dirs = len(all_dirs)
+    if not has_cpu0:
+        # cpu0 is counted in total_dirs but not in online scan
+        online += 1
+    total = total_dirs
+    return online, total
 
 # -------- RAPL power reader --------
 
@@ -126,6 +151,7 @@ def _build_status():
     per_core = cf.get("per_core_freq") or []
 
     power_w = POWER.read_watts()
+    cpus_online, cpus_total = _count_cpus()
 
     return {
         "temps": temps,
@@ -139,6 +165,7 @@ def _build_status():
             "available_governors": cf.get("available_governors", []),
             "available_frequencies": cf.get("available_frequencies", []),
         },
+        "cpus": {"online": cpus_online, "total": cpus_total},
         "power_w": power_w,
         "per_core_mhz": [round(f / 1000) for f in per_core] if per_core else [],
     }
@@ -170,7 +197,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         if path == "/health":
-            self._send_json(200, {"ok": True, "version": "0.2.0"})
+            self._send_json(200, {"ok": True, "version": "0.3.0"})
         elif path == "/status":
             self._send_json(200, _build_status())
         else:
@@ -194,30 +221,50 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if "?" in self.path:
             params.update(urllib.parse.parse_qs(self.path.split("?", 1)[1]))
 
-        if path != "/cpufreq":
+        if path == "/cpufreq":
+            gov = (params.get("governor", [""])[0] or "").strip()
+            freq = (params.get("max_freq", [""])[0] or "").strip()
+            try:
+                result = subprocess.run(
+                    [SETFREQ_SCRIPT, gov, freq],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode != 0:
+                    self._send_json(400, {
+                        "success": False,
+                        "error": (result.stderr or result.stdout).strip(),
+                    })
+                else:
+                    self._send_json(200, {
+                        "success": True,
+                        "message": result.stdout.strip(),
+                    })
+            except Exception as e:
+                self._send_json(500, {"success": False, "error": str(e)})
+        elif path == "/cpus":
+            online = (params.get("online", [""])[0] or "").strip()
+            if not online.isdigit():
+                self._send_json(400, {"success": False, "error": "online must be a positive integer"})
+                return
+            try:
+                result = subprocess.run(
+                    [SETCPUS_SCRIPT, online],
+                    capture_output=True, text=True, timeout=15,
+                )
+                if result.returncode != 0:
+                    self._send_json(400, {
+                        "success": False,
+                        "error": (result.stderr or result.stdout).strip(),
+                    })
+                else:
+                    self._send_json(200, {
+                        "success": True,
+                        "message": result.stdout.strip(),
+                    })
+            except Exception as e:
+                self._send_json(500, {"success": False, "error": str(e)})
+        else:
             self._send_json(404, {"error": "not found"})
-            return
-
-        gov = (params.get("governor", [""])[0] or "").strip()
-        freq = (params.get("max_freq", [""])[0] or "").strip()
-
-        try:
-            result = subprocess.run(
-                [SETFREQ_SCRIPT, gov, freq],
-                capture_output=True, text=True, timeout=5,
-            )
-            if result.returncode != 0:
-                self._send_json(400, {
-                    "success": False,
-                    "error": (result.stderr or result.stdout).strip(),
-                })
-            else:
-                self._send_json(200, {
-                    "success": True,
-                    "message": result.stdout.strip(),
-                })
-        except Exception as e:
-            self._send_json(500, {"success": False, "error": str(e)})
 
     def log_message(self, format, *args):
         pass  # silent

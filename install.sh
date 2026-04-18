@@ -37,8 +37,9 @@ echo "    Backups saved with suffix: bak_${TIMESTAMP}"
 echo "[*] Installing helper scripts..."
 cp "$SRC/pve-hwinfo.sh" /usr/local/bin/pve-hwinfo.sh
 cp "$SRC/pve-cpufreq-set.sh" /usr/local/bin/pve-cpufreq-set.sh
+cp "$SRC/pve-cpus-set.sh" /usr/local/bin/pve-cpus-set.sh
 cp "$SRC/pve-cpufreq-api.py" /usr/local/bin/pve-cpufreq-api.py
-chmod +x /usr/local/bin/pve-hwinfo.sh /usr/local/bin/pve-cpufreq-set.sh /usr/local/bin/pve-cpufreq-api.py
+chmod +x /usr/local/bin/pve-hwinfo.sh /usr/local/bin/pve-cpufreq-set.sh /usr/local/bin/pve-cpus-set.sh /usr/local/bin/pve-cpufreq-api.py
 
 # Install and start the API service
 echo "[*] Installing pve-cpufreq-api.service..."
