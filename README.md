@@ -55,21 +55,18 @@ Backups of all original files are saved with `bak_<timestamp>` suffix.
 
 ## 2. Install Home Assistant integration
 
-### Option A — HACS (Custom Repository)
-1. In HACS → **Integrations** → three-dot menu → **Custom repositories**
-2. Add: `https://github.com/mrkvka/proxmox-cpu-dashboard`, category **Integration**
-3. Install **Proxmox CPU Dashboard**, restart HA
+The HA integration lives in its own repository for cleaner HACS installation:
 
-### Option B — manual
-Copy `custom_components/proxmox_cpu_ctl/` to `/config/custom_components/` in HA and restart.
+### 👉 [mrkvka/ha-proxmox-cpu-ctl](https://github.com/mrkvka/ha-proxmox-cpu-ctl)
 
-### Configure
-**Settings → Devices & Services → + Add Integration → Proxmox CPU Dashboard**
-- **Host**: IP of Proxmox (e.g. `192.168.1.200`)
-- **Port**: `8087`
-- **Scan interval**: `15`
+Quick install via HACS:
+1. HACS → **Integrations** → three-dot menu → **Custom repositories**
+2. Add `https://github.com/mrkvka/ha-proxmox-cpu-ctl`, category **Integration**
+3. Install, restart HA
+4. **Settings → Devices & Services → + Add Integration → Proxmox CPU Dashboard**
+5. Enter Proxmox IP (e.g. `192.168.1.200`)
 
-A new device appears with ~12 entities.
+See the HA integration's README for manual install and automation examples.
 
 ---
 
