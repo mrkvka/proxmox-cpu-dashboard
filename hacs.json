@@ -1,8 +1,0 @@
-{
-  "name": "Proxmox CPU Dashboard",
-  "content_in_root": false,
-  "render_readme": true,
-  "homeassistant": "2024.10.0",
-  "country": ["RU", "US"],
-  "iot_class": "local_polling"
-}
