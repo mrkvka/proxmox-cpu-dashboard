@@ -20,7 +20,7 @@ import sys
 import time
 from typing import Any
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 
 
 def read_text(path: str) -> str | None:
@@ -479,7 +479,7 @@ def collect_memory_modules() -> list[dict[str, Any]]:
 def collect_network() -> list[dict[str, Any]]:
     interfaces = []
     for iface in sorted(os.listdir("/sys/class/net")):
-        if iface == "lo" or iface.startswith(("veth", "fwbr", "fwpr", "tap")):
+        if iface in ("lo", "bonding_masters") or iface.startswith(("veth", "fwbr", "fwpr", "tap", "vmbr")):
             continue
         path = f"/sys/class/net/{iface}"
         ethtool = {}
@@ -502,11 +502,42 @@ def collect_network() -> list[dict[str, Any]]:
     return interfaces
 
 
-def _row(param: str, current: Any, source: str = "") -> dict[str, Any]:
-    val = current
-    if val is None or val == "" or val == []:
-        val = "—"
-    return {"parameter": param, "current": val, "source": source}
+def _fmt_cell(value: Any) -> str:
+    if value is None or value == "" or value == []:
+        return "—"
+    return str(value)
+
+
+def _row(param: str, available: Any = None, applied: Any = None, source: str = "") -> dict[str, Any]:
+    applied_val = _fmt_cell(applied)
+    return {
+        "parameter": param,
+        "available": _fmt_cell(available),
+        "applied": applied_val,
+        "source": source,
+        "current": applied_val,
+    }
+
+
+def _parse_io_scheduler(raw: str | None) -> tuple[str, str]:
+    text = (raw or "").strip()
+    if not text:
+        return "—", "—"
+    applied = "—"
+    options: list[str] = []
+    for token in text.split():
+        if token.startswith("[") and token.endswith("]"):
+            applied = token.strip("[]")
+        else:
+            options.append(token.strip("[]"))
+    available = ", ".join(dict.fromkeys(options)) if options else applied
+    return available, applied
+
+
+def _mhz_range(lo: Any, hi: Any, suffix: str = "MHz") -> str:
+    if lo is None and hi is None:
+        return "—"
+    return f"{lo or '?'}–{hi or '?'} {suffix}"
 
 
 def build_inventory(data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -515,78 +546,89 @@ def build_inventory(data: dict[str, Any]) -> list[dict[str, Any]]:
     freq = cpu.get("frequency") or {}
     sysinfo = data.get("system") or {}
     lscpu = (data.get("lscpu") or {}).get("lscpu") or {}
+    model = lscpu.get("model_name") or sysinfo.get("processor")
+    govs = ", ".join(freq.get("available_governors") or [])
+    avail_mhz = freq.get("available_frequencies_mhz") or []
+    if avail_mhz:
+        freq_avail = ", ".join(str(m) for m in avail_mhz) + " MHz"
+    else:
+        freq_avail = _mhz_range(freq.get("hw_min_mhz"), freq.get("hw_max_mhz"), "MHz (HW)")
 
     sections.append({
         "id": "cpu",
         "title": "CPU",
         "rows": [
-            _row("Model", lscpu.get("model_name") or sysinfo.get("processor"), "lscpu"),
-            _row("Architecture", lscpu.get("architecture"), "lscpu"),
-            _row("Cores / threads", f"{cpu.get('online', '?')} online of {cpu.get('total', '?')}", "sysfs"),
-            _row("Governor (now)", freq.get("governor"), "sysfs"),
-            _row("Frequency (now)", f"{freq.get('current_mhz', '?')} MHz", "sysfs"),
-            _row("Max limit (now)", f"{freq.get('max_mhz', '?')} MHz", "sysfs"),
-            _row("HW range", f"{freq.get('hw_min_mhz', '?')}–{freq.get('hw_max_mhz', '?')} MHz", "sysfs"),
-            _row("Available governors", ", ".join(freq.get("available_governors") or []), "sysfs"),
+            _row("Model", model, model, "lscpu"),
+            _row("Architecture", lscpu.get("architecture"), lscpu.get("architecture"), "lscpu"),
+            _row("Logical CPUs", cpu.get("total"), f"{cpu.get('online', '?')} online", "sysfs"),
+            _row("Governor", govs or "—", freq.get("governor"), "sysfs"),
+            _row("Frequency", freq_avail, f"{freq.get('current_mhz', '?')} MHz", "sysfs"),
+            _row("Scaling max", _mhz_range(freq.get("min_mhz"), freq.get("max_mhz")), f"{freq.get('max_mhz', '?')} MHz", "sysfs"),
+            _row("HW limits", _mhz_range(freq.get("hw_min_mhz"), freq.get("hw_max_mhz")), f"{freq.get('current_mhz', '?')} MHz (now)", "sysfs"),
+            _row("Driver", freq.get("driver"), freq.get("driver"), "sysfs"),
         ],
     })
 
     mem = data.get("memory") or {}
+    total_gib = round((mem.get("MemTotal") or 0) / 1024 / 1024, 1)
+    free_gib = round((mem.get("MemAvailable") or 0) / 1024 / 1024, 1)
+    used_gib = round(max(total_gib - free_gib, 0), 1)
     mem_rows = [
-        _row("RAM total", f"{round((mem.get('MemTotal') or 0) / 1024 / 1024, 1)} GiB", "meminfo"),
-        _row("RAM available", f"{round((mem.get('MemAvailable') or 0) / 1024 / 1024, 1)} GiB", "meminfo"),
+        _row("RAM", f"{total_gib} GiB installed", f"{free_gib} GiB free, {used_gib} GiB used", "meminfo"),
     ]
     for mod in data.get("memory_modules") or []:
-        mem_rows.append(_row(
-            f"DIMM {mod.get('locator', '?')}",
-            f"{mod.get('size')} {mod.get('type', '')} @ {mod.get('speed', '')} ({mod.get('manufacturer', '')})",
-            "dmidecode",
-        ))
+        spec = f"{mod.get('size')} {mod.get('type', '')} @ {mod.get('speed', '')} ({mod.get('manufacturer', '')})"
+        mem_rows.append(_row(f"DIMM {mod.get('locator', '?')}", spec, "installed", "dmidecode"))
     sections.append({"id": "memory", "title": "Memory", "rows": mem_rows})
 
     diskstats = {d["device"]: d for d in (data.get("diskstats") or [])}
     for disk in data.get("storage") or []:
         name = disk.get("name")
         ds = diskstats.get(name) or {}
+        sched_avail, sched_applied = _parse_io_scheduler(disk.get("scheduler"))
         sections.append({
             "id": f"disk-{name}",
             "title": f"Storage: {name}",
             "rows": [
-                _row("Model", disk.get("model"), "smart"),
-                _row("Serial", disk.get("serial"), "smart"),
-                _row("Bus", disk.get("transport"), "lsblk"),
-                _row("Size", disk.get("size_bytes"), "lsblk"),
-                _row("Temperature (now)", f"{disk.get('temperature_c')} °C" if disk.get("temperature_c") is not None else None, "smart"),
-                _row("Wear (now)", f"{disk.get('wear_percent')} %" if disk.get("wear_percent") is not None else None, "smart"),
-                _row("Power-on hours", disk.get("power_on_hours"), "smart"),
-                _row("IO scheduler (now)", (disk.get("scheduler") or "").strip("[]"), "sysfs"),
-                _row("Total read", f"{ds.get('read_mib', '?')} MiB", "diskstats"),
-                _row("Total written", f"{ds.get('write_mib', '?')} MiB", "diskstats"),
+                _row("Model", disk.get("model"), disk.get("model"), "smart"),
+                _row("Serial", disk.get("serial"), disk.get("serial"), "smart"),
+                _row("Bus / type", disk.get("transport"), "rotational" if disk.get("rotational") == "1" else "SSD/NVMe", "lsblk"),
+                _row("Capacity", disk.get("size_bytes"), disk.get("size_bytes"), "lsblk"),
+                _row("Temperature", "SMART / NVMe health", f"{disk.get('temperature_c')} °C" if disk.get("temperature_c") is not None else None, "smart"),
+                _row("Wear", "100 % (new)", f"{disk.get('wear_percent')} %" if disk.get("wear_percent") is not None else None, "smart"),
+                _row("Power-on hours", "lifetime counter", disk.get("power_on_hours"), "smart"),
+                _row("IO scheduler", sched_avail, sched_applied, "sysfs"),
+                _row("Total read", "since boot", f"{ds.get('read_mib', '?')} MiB", "diskstats"),
+                _row("Total written", "since boot", f"{ds.get('write_mib', '?')} MiB", "diskstats"),
             ],
         })
 
     plat = data.get("platform") or {}
+    board = f"{(plat.get('baseboard') or {}).get('Manufacturer', '?')} {(plat.get('baseboard') or {}).get('Product Name', '')}".strip()
+    bios = f"{(plat.get('bios') or {}).get('Version', '?')} ({(plat.get('bios') or {}).get('Release Date', '?')})"
     sections.append({
         "id": "platform",
         "title": "Platform",
         "rows": [
-            _row("Board", f"{(plat.get('baseboard') or {}).get('Manufacturer', '?')} {(plat.get('baseboard') or {}).get('Product Name', '')}", "dmidecode"),
-            _row("BIOS", f"{(plat.get('bios') or {}).get('Version', '?')} ({(plat.get('bios') or {}).get('Release Date', '?')})", "dmidecode"),
-            _row("Kernel (now)", sysinfo.get("kernel"), "system"),
-            _row("PVE (now)", sysinfo.get("pveversion"), "pveversion"),
+            _row("Board", board, board, "dmidecode"),
+            _row("BIOS", bios, bios, "dmidecode"),
+            _row("Kernel", "running", sysinfo.get("kernel"), "system"),
+            _row("PVE", "installed", sysinfo.get("pveversion"), "pveversion"),
         ],
     })
 
     for iface in data.get("network") or []:
         eth = iface.get("ethtool") or {}
+        max_speed = eth.get("Supported link modes") or eth.get("Speed") or iface.get("speed_mbps")
+        cur_speed = eth.get("Speed") or iface.get("speed_mbps")
         sections.append({
             "id": f"net-{iface.get('name')}",
             "title": f"Network: {iface.get('name')}",
             "rows": [
-                _row("Operstate (now)", iface.get("operstate"), "sysfs"),
-                _row("Link (now)", "up" if iface.get("carrier") == 1 else "down", "sysfs"),
-                _row("Speed (now)", eth.get("Speed") or iface.get("speed_mbps"), "ethtool"),
-                _row("Driver", iface.get("driver"), "ethtool"),
+                _row("Operstate", "up / down", iface.get("operstate"), "sysfs"),
+                _row("Link", "carrier", "up" if iface.get("carrier") == 1 else "down", "sysfs"),
+                _row("Speed", max_speed or "—", cur_speed or "—", "ethtool"),
+                _row("Driver", iface.get("driver"), iface.get("driver"), "ethtool"),
             ],
         })
 
@@ -595,14 +637,17 @@ def build_inventory(data: dict[str, Any]) -> list[dict[str, Any]]:
         sections.append({
             "id": "temps",
             "title": "Temperatures",
-            "rows": [_row(t.get("label") or t.get("chip"), f"{t.get('value_c')} °C", "sensors") for t in sens["temperatures"][:12]],
+            "rows": [
+                _row(t.get("label") or t.get("chip"), "sensor", f"{t.get('value_c')} °C", "sensors")
+                for t in sens["temperatures"][:12]
+            ],
         })
     pwr = data.get("power") or {}
     if pwr.get("package_watts") is not None:
         sections.append({
             "id": "power",
             "title": "Power",
-            "rows": [_row("CPU package (now)", f"{pwr.get('package_watts')} W", "rapl")],
+            "rows": [_row("CPU package", "RAPL counter", f"{pwr.get('package_watts')} W", "rapl")],
         })
     return sections
 
