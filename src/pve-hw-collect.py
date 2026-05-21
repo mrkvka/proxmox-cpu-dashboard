@@ -18,9 +18,10 @@ import socket
 import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
-VERSION = "2.2.0"
+VERSION = "2.3.0"
 
 
 def read_text(path: str) -> str | None:
@@ -652,6 +653,154 @@ def build_inventory(data: dict[str, Any]) -> list[dict[str, Any]]:
     return sections
 
 
+
+CACHE_DIR = Path("/var/cache/pve-hw-dashboard")
+STATIC_CACHE = CACHE_DIR / "static.json"
+LIVE_SMART_INTERVAL = 30
+
+
+def save_static_cache(payload: dict[str, Any]) -> None:
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        static = {
+            "saved_at": int(time.time()),
+            "smart_refreshed": int(time.time()),
+            "lscpu": payload.get("lscpu"),
+            "platform": payload.get("platform"),
+            "memory_modules": payload.get("memory_modules"),
+            "storage": payload.get("storage"),
+        }
+        STATIC_CACHE.write_text(json.dumps(static, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def load_static_cache() -> dict[str, Any] | None:
+    try:
+        if STATIC_CACHE.is_file():
+            return json.loads(STATIC_CACHE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        pass
+    return None
+
+
+def _disk_temp_sysfs(name: str) -> int | None:
+    m = re.match(r"(nvme\d+)", name or "")
+    if m:
+        nvme = m.group(1)
+        for path in sorted(glob.glob(f"/sys/class/nvme/{nvme}/hwmon/hwmon*/temp*_input")):
+            val = read_int(path)
+            if val and val > 0:
+                return int(val / 1000) if val > 200 else val
+    for path in sorted(glob.glob(f"/sys/block/{name}/device/hwmon/hwmon*/temp*_input")):
+        val = read_int(path)
+        if val and val > 0:
+            return int(val / 1000) if val > 200 else val
+    return None
+
+
+def collect_storage_live(cached: list[dict[str, Any]], refresh_smart: bool) -> list[dict[str, Any]]:
+    if refresh_smart or not cached:
+        return collect_storage()
+    disks = []
+    for disk in cached:
+        name = disk.get("name")
+        if not name:
+            continue
+        row = dict(disk)
+        queue = f"/sys/block/{name}/queue"
+        if os.path.isdir(queue):
+            row["scheduler"] = read_text(os.path.join(queue, "scheduler")) or row.get("scheduler")
+        temp = _disk_temp_sysfs(name)
+        if temp is not None:
+            row["temperature_c"] = temp
+        disks.append(row)
+    return disks
+
+
+def collect_system_live() -> dict[str, Any]:
+    load1, load5, load15 = os.getloadavg()
+    uptime = read_float("/proc/uptime")
+    return {
+        "hostname": socket.gethostname(),
+        "kernel": platform.release(),
+        "loadavg": [load1, load5, load15],
+        "uptime_seconds": int(uptime) if uptime else None,
+    }
+
+
+def collect_live() -> dict[str, Any]:
+    static = load_static_cache() or {}
+    smart_at = int(static.get("smart_refreshed") or 0)
+    refresh_smart = (not static.get("storage")) or (int(time.time()) - smart_at >= LIVE_SMART_INTERVAL)
+    cpu = collect_cpus()
+    storage = collect_storage_live(static.get("storage") or [], refresh_smart)
+    if refresh_smart and storage:
+        static = {**static, "storage": storage, "smart_refreshed": int(time.time())}
+        try:
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            STATIC_CACHE.write_text(json.dumps(static, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            pass
+    payload = {
+        "meta": {
+            "name": "Proxmox CPU Dashboard",
+            "version": VERSION,
+            "collected_at": int(time.time()),
+            "mode": "live",
+        },
+        "system": collect_system_live(),
+        "cpu": cpu,
+        "sensors": collect_sensors(),
+        "power": collect_powercap(),
+        "memory": collect_memory(),
+        "diskstats": collect_diskstats(),
+        "network": collect_network(),
+        "storage": storage,
+        "lscpu": static.get("lscpu") or collect_lscpu(),
+        "platform": static.get("platform") or collect_platform(),
+        "memory_modules": static.get("memory_modules") or collect_memory_modules(),
+        "capabilities": collect_capabilities(cpu),
+        "profiles": profile_catalog(cpu),
+    }
+    payload["inventory"] = build_inventory(payload)
+    return payload
+
+
+def wrap_compact_legacy(data: dict[str, Any]) -> dict[str, Any]:
+    cpu = data.get("cpu") or {}
+    sens = (data.get("sensors") or {}).get("normalized") or {}
+    return {
+        "meta": data.get("meta"),
+        "cpu": cpu,
+        "sensors": {
+            "temperatures": sens.get("temperatures", [])[:12],
+            "fans": sens.get("fans", [])[:8],
+        },
+        "power": data.get("power") or {},
+        "capabilities": data.get("capabilities"),
+        "profiles": data.get("profiles"),
+        "cpufreq": {
+            "governor": (cpu.get("frequency") or {}).get("governor"),
+            "available_governors": (cpu.get("frequency") or {}).get("available_governors"),
+            "scaling_cur_freq": (cpu.get("frequency") or {}).get("current_khz"),
+            "scaling_min_freq": (cpu.get("frequency") or {}).get("min_khz"),
+            "scaling_max_freq": (cpu.get("frequency") or {}).get("max_khz"),
+            "cpuinfo_min_freq": (cpu.get("frequency") or {}).get("hw_min_khz"),
+            "cpuinfo_max_freq": (cpu.get("frequency") or {}).get("hw_max_khz"),
+            "available_frequencies": (cpu.get("frequency") or {}).get("available_frequencies_khz"),
+            "per_core_freq": [m * 1000 for m in (cpu.get("frequency") or {}).get("per_core_mhz", []) if m],
+        },
+        "cpus": {"online": cpu.get("online"), "total": cpu.get("total")},
+        "storage": data.get("storage"),
+        "diskstats": data.get("diskstats"),
+        "platform": data.get("platform"),
+        "memory_modules": data.get("memory_modules"),
+        "network": data.get("network"),
+        "inventory": data.get("inventory"),
+    }
+
+
 def collect_lscpu() -> dict[str, Any]:
     info: dict[str, str] = {}
     text = read_text("/proc/cpuinfo")
@@ -772,51 +921,26 @@ def collect_full() -> dict[str, Any]:
         "profiles": profile_catalog(cpu),
     }
     payload["inventory"] = build_inventory(payload)
+    save_static_cache(payload)
     return payload
 
 
 def collect_compact() -> dict[str, Any]:
-    full = collect_full()
-    cpu = full["cpu"]
-    sens = full["sensors"]["normalized"]
-    return {
-        "meta": full["meta"],
-        "cpu": cpu,
-        "sensors": {
-            "temperatures": sens.get("temperatures", [])[:12],
-            "fans": sens.get("fans", [])[:8],
-        },
-        "power": {"package_watts": full["power"].get("package_watts")},
-        "capabilities": full["capabilities"],
-        "profiles": full["profiles"],
-        # legacy fields for older parsers
-        "cpufreq": {
-            "governor": cpu["frequency"].get("governor"),
-            "available_governors": cpu["frequency"].get("available_governors"),
-            "scaling_cur_freq": cpu["frequency"].get("current_khz"),
-            "scaling_min_freq": cpu["frequency"].get("min_khz"),
-            "scaling_max_freq": cpu["frequency"].get("max_khz"),
-            "cpuinfo_min_freq": cpu["frequency"].get("hw_min_khz"),
-            "cpuinfo_max_freq": cpu["frequency"].get("hw_max_khz"),
-            "available_frequencies": cpu["frequency"].get("available_frequencies_khz"),
-            "per_core_freq": [m * 1000 for m in cpu["frequency"].get("per_core_mhz", []) if m],
-        },
-        "cpus": {"online": cpu["online"], "total": cpu["total"]},
-        "storage": full.get("storage"),
-        "diskstats": full.get("diskstats"),
-        "platform": full.get("platform"),
-        "memory_modules": full.get("memory_modules"),
-        "network": full.get("network"),
-        "inventory": full.get("inventory"),
-    }
+    return wrap_compact_legacy(collect_live())
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--compact", action="store_true")
+    parser.add_argument("--live", action="store_true")
     parser.add_argument("--pretty", action="store_true")
     args = parser.parse_args()
-    data = collect_compact() if args.compact else collect_full()
+    if args.live:
+        data = collect_live()
+    elif args.compact:
+        data = collect_compact()
+    else:
+        data = collect_full()
     indent = 2 if args.pretty else None
     json.dump(data, sys.stdout, ensure_ascii=False, separators=None if args.pretty else (",", ":"))
     sys.stdout.write("\n")

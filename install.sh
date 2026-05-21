@@ -51,7 +51,7 @@ echo "[*] Installing Summary UI..."
 cp "$SRC/pve_node_summary.js" /usr/share/pve-manager/js/pve_node_summary.js
 INDEX_TPL="/usr/share/pve-manager/index.html.tpl"
 if ! grep -q 'pve_node_summary.js' "$INDEX_TPL"; then
-    sed -i '/pvemanagerlib.js/a\    <script type="text\/javascript" src="\/pve2\/js\/pve_node_summary.js?ver=2.2"><\/script>' "$INDEX_TPL"
+    sed -i '/pvemanagerlib.js/a\    <script type="text\/javascript" src="\/pve2\/js\/pve_node_summary.js?ver=2.3"><\/script>' "$INDEX_TPL"
 fi
 
 echo "[*] Restarting pvedaemon + pveproxy (required for new API routes)..."

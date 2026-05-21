@@ -13,9 +13,11 @@ cat > /tmp/pve-hw-endpoints.pl << 'PERLCODE'
 
 # PVE CPU Dashboard native hardware API
 sub pve_hw_collect_json {
-    my $compact = shift;
+    my ($mode) = @_;
+    $mode //= 'full';
     my @cmd = ('/usr/local/bin/pve-hw-collect.py');
-    push @cmd, '--compact' if $compact;
+    push @cmd, '--compact' if $mode eq 'compact';
+    push @cmd, '--live' if $mode eq 'live';
     my $json = '';
     open(my $fh, '-|', @cmd) or die "failed to run pve-hw-collect.py: $!\n";
     while (my $line = <$fh>) { $json .= $line; }
@@ -62,7 +64,29 @@ __PACKAGE__->register_method({
     returns => { type => 'object' },
     code => sub {
         my ($param) = @_;
-        return pve_hw_collect_json(0);
+        return pve_hw_collect_json('full');
+    },
+});
+
+
+__PACKAGE__->register_method({
+    name => 'hw_live',
+    path => 'hwlive',
+    method => 'GET',
+    description => "Live hardware snapshot for UI polling (fast, cached static fields).",
+    permissions => { check => ['perm', '/nodes/{node}', ['Sys.Audit']] },
+    proxyto => 'node',
+    protected => 1,
+    parameters => {
+        additionalProperties => 0,
+        properties => {
+            node => get_standard_option('pve-node'),
+        },
+    },
+    returns => { type => 'object' },
+    code => sub {
+        my ($param) = @_;
+        return pve_hw_collect_json('live');
     },
 });
 

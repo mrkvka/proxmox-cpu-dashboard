@@ -1,4 +1,4 @@
-/* Proxmox CPU Dashboard v2.2 - inventory: available vs applied */
+/* Proxmox CPU Dashboard v2.3 - live inventory polling */
 var PVECPUDash = (function() {
     function ensureStyle() {
         if (document.getElementById('pve-hw-dash-style')) return;
@@ -118,6 +118,89 @@ var PVECPUDash = (function() {
         return data.cpu || data.cpus || {};
     }
 
+
+    var LIVE_POLL_MS = 5000;
+
+    function syncControls(panel, data) {
+        var cf = freqOf(data);
+        var cpu = cpuOf(data);
+        var combo = panel.down('#govCombo');
+        if (combo && cf.available_governors && cf.available_governors.length) {
+            var cur = combo.getValue();
+            combo.getStore().loadData(cf.available_governors.map(function(g) {
+                return { value: g, text: g };
+            }));
+            if (cf.governor) combo.setValue(cf.governor);
+            else if (cur) combo.setValue(cur);
+        }
+        var ff = panel.down('#freqField');
+        if (ff && cf.max_khz) ff.setValue(Math.round(cf.max_khz / 1000));
+        var of = panel.down('#onlineField');
+        if (of && cpu.online) of.setValue(cpu.online);
+    }
+
+    function stopLivePoll(panel) {
+        if (panel._pveHwPoll) {
+            clearInterval(panel._pveHwPoll);
+            panel._pveHwPoll = null;
+        }
+        if (panel._pveHwStoreMon && panel.getStore) {
+            panel.getStore().un('load', panel._pveHwStoreMon);
+            panel._pveHwStoreMon = null;
+        }
+    }
+
+    function startLivePoll(panel) {
+        stopLivePoll(panel);
+        panel._pveHwPoll = setInterval(function() {
+            if (panel.destroyed || panel.isDestroyed) {
+                stopLivePoll(panel);
+                return;
+            }
+            if (!panel.isVisible(true)) return;
+            fetchLive(panel);
+        }, LIVE_POLL_MS);
+        var store = panel.getStore && panel.getStore();
+        if (store) {
+            panel._pveHwStoreMon = function() {
+                var rec = store.first && store.first();
+                if (!rec) return;
+                var val = rec.get('thermalstate');
+                if (!val) return;
+                try {
+                    var data = parseState(val);
+                    if (data.inventory && data.inventory.length) {
+                        panel._pveHwData = data;
+                        repaintInventory(panel, data);
+                        syncControls(panel, data);
+                    }
+                } catch (e) { /* ignore */ }
+            };
+            store.on('load', panel._pveHwStoreMon);
+        }
+    }
+
+    function fetchLive(panel, cb) {
+        var node = panel.pveSelNode.data.node;
+        if (panel._pveHwLivePending) return;
+        panel._pveHwLivePending = true;
+        Proxmox.Utils.API2Request({
+            url: '/nodes/' + encodeURIComponent(node) + '/hwlive',
+            method: 'GET',
+            failure: function() {
+                panel._pveHwLivePending = false;
+                if (cb) cb(panel._pveHwData || {});
+            },
+            success: function(resp) {
+                panel._pveHwLivePending = false;
+                var data = (resp.result && resp.result.data) ? resp.result.data : (resp.result || {});
+                repaintInventory(panel, data);
+                syncControls(panel, data);
+                if (cb) cb(data);
+            }
+        });
+    }
+
     function repaintInventory(panel, data) {
         panel._pveHwData = data;
         var widget = panel.down('#pveHwInventory');
@@ -148,11 +231,11 @@ var PVECPUDash = (function() {
         var base = '/nodes/' + encodeURIComponent(node);
         var done = function() {
             Ext.Msg.alert(gettext('Success'), gettext('Settings applied'));
-            fetchFull(panel, function() {
+            fetchFull(panel, function(data) {
                 var store = panel.getStore && panel.getStore();
                 if (store) store.load();
-                var inv = panel.down('#pveHwInventory');
-                if (inv && inv.update) inv.update(panel._pveHwData);
+                syncControls(panel, data || panel._pveHwData || {});
+                startLivePoll(panel);
             });
         };
         var stepCpufreq = function() {
@@ -202,6 +285,10 @@ var PVECPUDash = (function() {
         renderAllInventory: renderAllInventory,
         renderInventory: renderInventory,
         fetchFull: fetchFull,
+        fetchLive: fetchLive,
+        startLivePoll: startLivePoll,
+        stopLivePoll: stopLivePoll,
+        syncControls: syncControls,
         freqOf: freqOf,
         cpuOf: cpuOf,
         applySettings: applySettings,
@@ -330,6 +417,7 @@ Ext.define('PVE.node.StatusView', {
                                             var store = panel.getStore && panel.getStore();
                                             if (store) store.load();
                                             PVECPUDash.repaintInventory(panel, data);
+                                            PVECPUDash.syncControls(panel, data);
                                         });
                                     },
                                     failure: function(r) {
@@ -347,6 +435,7 @@ Ext.define('PVE.node.StatusView', {
                         var panel = btn.up('pveNodeStatus');
                         PVECPUDash.fetchFull(panel, function(data) {
                             PVECPUDash.repaintInventory(panel, data);
+                            PVECPUDash.syncControls(panel, data);
                             var store = panel.getStore && panel.getStore();
                             if (store) store.load();
                         });
@@ -357,44 +446,15 @@ Ext.define('PVE.node.StatusView', {
 
         me.on('afterrender', function() {
             PVECPUDash.fetchFull(me, function(data) {
-                var inv = me.down('#pveHwInventory');
                 PVECPUDash.repaintInventory(me, data);
-                var cf = PVECPUDash.freqOf(data);
-                var cpu = PVECPUDash.cpuOf(data);
-                var combo = me.down('#govCombo');
-                if (combo && cf.available_governors) {
-                    combo.getStore().loadData(cf.available_governors.map(function(g) {
-                        return { value: g, text: g };
-                    }));
-                    if (cf.governor) combo.setValue(cf.governor);
-                }
-                var ff = me.down('#freqField');
-                if (ff && cf.max_khz) ff.setValue(Math.round(cf.max_khz / 1000));
-                var of = me.down('#onlineField');
-                if (of && cpu.online) of.setValue(cpu.online);
+                PVECPUDash.syncControls(me, data);
+                PVECPUDash.startLivePoll(me);
+            });
+            me.on('destroy', function() {
+                PVECPUDash.stopLivePoll(me);
             });
 
-            var n = 0;
-            var timer = setInterval(function() {
-                if (++n > 20) clearInterval(timer);
-                var rec = me.getStore && me.getStore().first && me.getStore().first();
-                if (!rec) return;
-                var val = rec.get('thermalstate');
-                if (!val) return;
-                clearInterval(timer);
-                try {
-                    var data = PVECPUDash.parseState(val);
-                    me._pveHwData = data;
-                    var inv = me.down('#pveHwInventory');
-                    if (inv && inv.update && (!data.inventory || !data.inventory.length)) {
-                        PVECPUDash.fetchFull(me, function(full) {
-                            PVECPUDash.repaintInventory(me, full);
-                        });
-                    } else if (inv && inv.update) {
-                        PVECPUDash.repaintInventory(me, data);
-                    }
-                } catch (e) { /* ignore */ }
-            }, 800);
+
         });
     }
 });
