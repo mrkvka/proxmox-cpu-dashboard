@@ -1,4 +1,4 @@
-/* Proxmox CPU Dashboard v2.3.4 - pmxInfoWidget + frozen updates */
+/* Proxmox CPU Dashboard v2.3.5 - flash on value change */
 var PVECPUDash = (function() {
     function ensureStyle() {
         if (document.getElementById('pve-hw-dash-style')) return;
@@ -18,7 +18,13 @@ var PVECPUDash = (function() {
             '.pve-hw-panel{margin:4px 10px 8px;padding:8px 10px!important;border:1px solid rgba(128,128,128,.35);border-radius:4px}',
             '.pve-hw-label{font-size:10px;font-weight:700;text-transform:uppercase;opacity:.7}',
             '.pve-hw-row-warn td.applied{color:#d97706}',
-            '.pve-hw-row-danger td.applied{color:#dc2626}'
+            '.pve-hw-row-danger td.applied{color:#dc2626}',
+            '@keyframes pve-hw-flash-up{0%{background-color:rgba(35,165,90,.55)}100%{background-color:transparent}}',
+            '@keyframes pve-hw-flash-down{0%{background-color:rgba(217,119,6,.55)}100%{background-color:transparent}}',
+            '@keyframes pve-hw-flash-changed{0%{background-color:rgba(47,128,237,.45)}100%{background-color:transparent}}',
+            '.pve-hw-table td.pve-hw-flash-up{animation:pve-hw-flash-up 1.4s ease-out}',
+            '.pve-hw-table td.pve-hw-flash-down{animation:pve-hw-flash-down 1.4s ease-out}',
+            '.pve-hw-table td.pve-hw-flash-changed{animation:pve-hw-flash-changed 1.4s ease-out}'
         ].join('');
         var s = document.createElement('style');
         s.id = 'pve-hw-dash-style';
@@ -141,6 +147,66 @@ var PVECPUDash = (function() {
         }
     }
 
+
+    var FLASH_MS = 1400;
+
+    function getPrev(panel) {
+        if (!panel._pveHwPrev) panel._pveHwPrev = {};
+        return panel._pveHwPrev;
+    }
+
+    function clearPrev(panel) {
+        panel._pveHwPrev = {};
+    }
+
+    function parseNumeric(s) {
+        var m = String(s).replace(/,/g, '.').match(/-?\d+(?:\.\d+)?/);
+        return m ? parseFloat(m[0]) : null;
+    }
+
+    function isInverseMetric(param) {
+        var p = String(param).toLowerCase();
+        return p.indexOf('temp') >= 0 || p.indexOf('wear') >= 0 ||
+            p.indexOf('power') >= 0 || p.indexOf('used') >= 0;
+    }
+
+    function flashKind(param, oldStr, newStr) {
+        if (oldStr === newStr) return null;
+        var o = parseNumeric(oldStr);
+        var n = parseNumeric(newStr);
+        if (o !== null && n !== null && !isNaN(o) && !isNaN(n) && o !== n) {
+            var up = n > o;
+            if (isInverseMetric(param)) up = !up;
+            return up ? 'pve-hw-flash-up' : 'pve-hw-flash-down';
+        }
+        return 'pve-hw-flash-changed';
+    }
+
+    function flashCell(td, kind) {
+        if (!td || !kind) return;
+        td.classList.remove('pve-hw-flash-up', 'pve-hw-flash-down', 'pve-hw-flash-changed');
+        void td.offsetWidth;
+        td.classList.add(kind);
+        if (td._pveHwFlashTimer) clearTimeout(td._pveHwFlashTimer);
+        td._pveHwFlashTimer = setTimeout(function() {
+            td.classList.remove('pve-hw-flash-up', 'pve-hw-flash-down', 'pve-hw-flash-changed');
+            td._pveHwFlashTimer = null;
+        }, FLASH_MS);
+    }
+
+    function updateTableCell(panel, td, rowKeyStr, col, param, newVal) {
+        if (!td) return;
+        newVal = String(newVal);
+        var prev = getPrev(panel);
+        var pk = rowKeyStr + '::' + col;
+        var oldVal = prev[pk];
+        if (oldVal !== undefined && oldVal !== newVal) {
+            flashCell(td, flashKind(param, oldVal, newVal));
+        }
+        prev[pk] = newVal;
+        if (td.textContent !== newVal) td.textContent = newVal;
+    }
+
     function buildRowMaps(sections) {
         var byKey = {};
         var byParam = {};
@@ -154,7 +220,7 @@ var PVECPUDash = (function() {
         return { byKey: byKey, byParam: byParam };
     }
 
-    function updateInventoryCells(wrapCmp, sections) {
+    function updateInventoryCells(wrapCmp, sections, panel) {
         var wrap = wrapDom(wrapCmp);
         if (!wrap || !sections || !sections.length) return false;
         var rows = wrap.querySelectorAll('tr[data-pve-hw-row]');
@@ -162,7 +228,7 @@ var PVECPUDash = (function() {
         var maps = buildRowMaps(sections);
         var updated = 0;
         Ext.Array.forEach(rows, function(tr) {
-            var key = tr.getAttribute('data-pve-hw-row');
+            var key = tr.getAttribute('data-pve-hw-row') || '';
             var row = maps.byKey[key];
             if (!row) {
                 var paramTd = tr.querySelector('td.param');
@@ -174,10 +240,9 @@ var PVECPUDash = (function() {
             var available = String(row.available != null ? row.available : '—');
             var cls = rowClass(row.parameter, applied);
             if (tr.className !== cls) tr.className = cls;
-            var availTd = tr.querySelector('td.avail');
-            var appliedTd = tr.querySelector('td.applied');
-            if (availTd && availTd.textContent !== available) availTd.textContent = available;
-            if (appliedTd && appliedTd.textContent !== applied) appliedTd.textContent = applied;
+            var rk = key || rowKey('', row.parameter);
+            updateTableCell(panel, tr.querySelector('td.avail'), rk, 'avail', row.parameter, available);
+            updateTableCell(panel, tr.querySelector('td.applied'), rk, 'applied', row.parameter, applied);
         });
         return updated > 0 && updated >= Math.min(rows.length, inventoryRowCount(sections));
     }
@@ -291,10 +356,11 @@ var PVECPUDash = (function() {
         var sections = data && data.inventory;
         var wrap = inventoryWrap(panel);
         if (!forceFull && sections && sections.length && wrap &&
-            updateInventoryCells(wrap, sections)) {
+            updateInventoryCells(wrap, sections, panel)) {
             return;
         }
         setInventoryHtml(panel, renderAllInventory(data));
+        clearPrev(panel);
         panel._pveHwTableReady = !!(sections && sections.length);
     }
 
