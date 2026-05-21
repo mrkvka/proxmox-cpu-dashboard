@@ -1,4 +1,4 @@
-/* Proxmox CPU Dashboard v2.3.1 - incremental cell updates */
+/* Proxmox CPU Dashboard v2.3.2 - incremental cell updates */
 var PVECPUDash = (function() {
     function ensureStyle() {
         if (document.getElementById('pve-hw-dash-style')) return;
@@ -180,7 +180,7 @@ var PVECPUDash = (function() {
     }
 
 
-    var LIVE_POLL_MS = 5000;
+    var LIVE_POLL_MS = 1000;
 
     function syncControls(panel, data) {
         var cf = freqOf(data);
