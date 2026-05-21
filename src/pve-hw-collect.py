@@ -20,7 +20,7 @@ import sys
 import time
 from typing import Any
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 
 
 def read_text(path: str) -> str | None:
@@ -310,11 +310,301 @@ def collect_memory() -> dict[str, Any]:
     return mem
 
 
+# Appended to pve-hw-collect.py - merged by build script
+
 def collect_block() -> list[dict[str, Any]]:
-    data = run_json(["lsblk", "-J", "-O", "-o", "NAME,MODEL,SIZE,TYPE,ROTA,TRAN,TEMPERATURE,MOUNTPOINTS"])
+    data = run_json([
+        "lsblk", "-J", "-o",
+        "NAME,MODEL,SIZE,TYPE,ROTA,TRAN,REV,SERIAL,MOUNTPOINTS",
+    ])
     if not isinstance(data, dict):
         return []
     return data.get("blockdevices") or []
+
+
+def _flatten_disks(blockdevices: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    disks = []
+
+    def walk(nodes, parents=None):
+        parents = parents or []
+        for node in nodes or []:
+            if not isinstance(node, dict):
+                continue
+            name = node.get("name")
+            children = node.get("children") or []
+            if node.get("type") == "disk":
+                disks.append({**node, "parents": parents[:]})
+            if children:
+                walk(children, parents + ([name] if name else []))
+
+    walk(blockdevices)
+    return disks
+
+
+def _smartctl_json(path: str) -> dict[str, Any]:
+    if not shutil.which("smartctl"):
+        return {}
+    for args in (["-j", "-a", path], ["-j", "-i", path]):
+        proc = subprocess.run(
+            ["smartctl", *args],
+            capture_output=True,
+            text=True,
+            timeout=12,
+            check=False,
+        )
+        if proc.stdout.strip():
+            try:
+                return json.loads(proc.stdout)
+            except Exception:
+                pass
+    return {}
+
+
+def collect_storage() -> list[dict[str, Any]]:
+    disks = []
+    for node in _flatten_disks(collect_block()):
+        name = node.get("name")
+        if not name:
+            continue
+        path = f"/dev/{name}"
+        smart = _smartctl_json(path)
+        nvme = smart.get("nvme_smart_health_information_log") or {}
+        temp = nvme.get("temperature")
+        wear = nvme.get("percent_used")
+        hours = nvme.get("power_on_hours")
+        if temp is None:
+            for item in (smart.get("ata_smart_attributes") or {}).get("table") or []:
+                label = (item.get("name") or "").lower()
+                if label == "temperature_celsius":
+                    temp = item.get("raw", {}).get("value")
+                if label == "power_on_hours":
+                    hours = hours or item.get("raw", {}).get("value")
+        queue = f"/sys/block/{name}/queue"
+        disks.append({
+            "name": name,
+            "path": path,
+            "model": node.get("model") or smart.get("model_name"),
+            "serial": node.get("serial") or smart.get("serial_number"),
+            "size_bytes": node.get("size"),
+            "transport": node.get("tran"),
+            "rotational": node.get("rota"),
+            "revision": node.get("rev"),
+            "mountpoints": node.get("mountpoints"),
+            "temperature_c": temp,
+            "wear_percent": wear,
+            "power_on_hours": hours,
+            "scheduler": read_text(os.path.join(queue, "scheduler")) if os.path.isdir(queue) else "",
+            "read_ahead_kb": read_int(os.path.join(queue, "read_ahead_kb")),
+            "max_sectors_kb": read_int(os.path.join(queue, "max_sectors_kb")),
+        })
+    return disks
+
+
+def collect_diskstats() -> list[dict[str, Any]]:
+    text = read_text("/proc/diskstats")
+    if not text:
+        return []
+    stats = []
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 14 or not parts[2]:
+            continue
+        name = parts[2]
+        if name.startswith(("loop", "ram", "dm-")):
+            continue
+        rd_sectors = int(parts[5])
+        wr_sectors = int(parts[9])
+        stats.append({
+            "device": name,
+            "reads_completed": int(parts[3]),
+            "writes_completed": int(parts[7]),
+            "read_mib": round(rd_sectors * 512 / (1024 * 1024), 2),
+            "write_mib": round(wr_sectors * 512 / (1024 * 1024), 2),
+        })
+    return stats
+
+
+def _dmidecode_records(dtype: str) -> list[dict[str, str]]:
+    if not shutil.which("dmidecode"):
+        return []
+    proc = subprocess.run(["dmidecode", "-t", dtype], capture_output=True, text=True, timeout=8, check=False)
+    if proc.returncode != 0:
+        return []
+    records, current = [], {}
+    for line in proc.stdout.splitlines():
+        if line.startswith("Handle "):
+            if current:
+                records.append(current)
+            current = {}
+        elif ":" in line:
+            k, v = line.split(":", 1)
+            current[k.strip()] = v.strip()
+    if current:
+        records.append(current)
+    return records
+
+
+def collect_platform() -> dict[str, Any]:
+    pci = []
+    if shutil.which("lspci"):
+        proc = subprocess.run(["lspci"], capture_output=True, text=True, timeout=5, check=False)
+        if proc.returncode == 0:
+            pci = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()][:20]
+    return {
+        "system": (_dmidecode_records("system") or [{}])[0],
+        "baseboard": (_dmidecode_records("baseboard") or [{}])[0],
+        "bios": (_dmidecode_records("bios") or [{}])[0],
+        "processor_dmi": (_dmidecode_records("processor") or [{}])[0],
+        "pci_summary": pci,
+    }
+
+
+def collect_memory_modules() -> list[dict[str, Any]]:
+    modules = []
+    for rec in _dmidecode_records("memory"):
+        size = rec.get("Size", "")
+        if not size or "no module" in size.lower():
+            continue
+        modules.append({
+            "locator": rec.get("Locator"),
+            "size": size,
+            "type": rec.get("Type"),
+            "speed": rec.get("Speed") or rec.get("Configured Memory Speed"),
+            "manufacturer": rec.get("Manufacturer"),
+            "part_number": rec.get("Part Number"),
+        })
+    return modules
+
+
+def collect_network() -> list[dict[str, Any]]:
+    interfaces = []
+    for iface in sorted(os.listdir("/sys/class/net")):
+        if iface == "lo" or iface.startswith(("veth", "fwbr", "fwpr", "tap")):
+            continue
+        path = f"/sys/class/net/{iface}"
+        ethtool = {}
+        if shutil.which("ethtool"):
+            proc = subprocess.run(["ethtool", iface], capture_output=True, text=True, timeout=4, check=False)
+            if proc.returncode == 0:
+                for line in proc.stdout.splitlines():
+                    if ":" in line:
+                        k, v = line.split(":", 1)
+                        ethtool[k.strip()] = v.strip()
+        interfaces.append({
+            "name": iface,
+            "carrier": read_int(os.path.join(path, "carrier")),
+            "speed_mbps": read_int(os.path.join(path, "speed")),
+            "duplex": read_text(os.path.join(path, "duplex")),
+            "operstate": read_text(os.path.join(path, "operstate")),
+            "driver": ethtool.get("driver"),
+            "ethtool": ethtool,
+        })
+    return interfaces
+
+
+def _row(param: str, current: Any, source: str = "") -> dict[str, Any]:
+    val = current
+    if val is None or val == "" or val == []:
+        val = "—"
+    return {"parameter": param, "current": val, "source": source}
+
+
+def build_inventory(data: dict[str, Any]) -> list[dict[str, Any]]:
+    sections = []
+    cpu = data.get("cpu") or {}
+    freq = cpu.get("frequency") or {}
+    sysinfo = data.get("system") or {}
+    lscpu = (data.get("lscpu") or {}).get("lscpu") or {}
+
+    sections.append({
+        "id": "cpu",
+        "title": "CPU",
+        "rows": [
+            _row("Model", lscpu.get("model_name") or sysinfo.get("processor"), "lscpu"),
+            _row("Architecture", lscpu.get("architecture"), "lscpu"),
+            _row("Cores / threads", f"{cpu.get('online', '?')} online of {cpu.get('total', '?')}", "sysfs"),
+            _row("Governor (now)", freq.get("governor"), "sysfs"),
+            _row("Frequency (now)", f"{freq.get('current_mhz', '?')} MHz", "sysfs"),
+            _row("Max limit (now)", f"{freq.get('max_mhz', '?')} MHz", "sysfs"),
+            _row("HW range", f"{freq.get('hw_min_mhz', '?')}–{freq.get('hw_max_mhz', '?')} MHz", "sysfs"),
+            _row("Available governors", ", ".join(freq.get("available_governors") or []), "sysfs"),
+        ],
+    })
+
+    mem = data.get("memory") or {}
+    mem_rows = [
+        _row("RAM total", f"{round((mem.get('MemTotal') or 0) / 1024 / 1024, 1)} GiB", "meminfo"),
+        _row("RAM available", f"{round((mem.get('MemAvailable') or 0) / 1024 / 1024, 1)} GiB", "meminfo"),
+    ]
+    for mod in data.get("memory_modules") or []:
+        mem_rows.append(_row(
+            f"DIMM {mod.get('locator', '?')}",
+            f"{mod.get('size')} {mod.get('type', '')} @ {mod.get('speed', '')} ({mod.get('manufacturer', '')})",
+            "dmidecode",
+        ))
+    sections.append({"id": "memory", "title": "Memory", "rows": mem_rows})
+
+    diskstats = {d["device"]: d for d in (data.get("diskstats") or [])}
+    for disk in data.get("storage") or []:
+        name = disk.get("name")
+        ds = diskstats.get(name) or {}
+        sections.append({
+            "id": f"disk-{name}",
+            "title": f"Storage: {name}",
+            "rows": [
+                _row("Model", disk.get("model"), "smart"),
+                _row("Serial", disk.get("serial"), "smart"),
+                _row("Bus", disk.get("transport"), "lsblk"),
+                _row("Size", disk.get("size_bytes"), "lsblk"),
+                _row("Temperature (now)", f"{disk.get('temperature_c')} °C" if disk.get("temperature_c") is not None else None, "smart"),
+                _row("Wear (now)", f"{disk.get('wear_percent')} %" if disk.get("wear_percent") is not None else None, "smart"),
+                _row("Power-on hours", disk.get("power_on_hours"), "smart"),
+                _row("IO scheduler (now)", (disk.get("scheduler") or "").strip("[]"), "sysfs"),
+                _row("Total read", f"{ds.get('read_mib', '?')} MiB", "diskstats"),
+                _row("Total written", f"{ds.get('write_mib', '?')} MiB", "diskstats"),
+            ],
+        })
+
+    plat = data.get("platform") or {}
+    sections.append({
+        "id": "platform",
+        "title": "Platform",
+        "rows": [
+            _row("Board", f"{(plat.get('baseboard') or {}).get('Manufacturer', '?')} {(plat.get('baseboard') or {}).get('Product Name', '')}", "dmidecode"),
+            _row("BIOS", f"{(plat.get('bios') or {}).get('Version', '?')} ({(plat.get('bios') or {}).get('Release Date', '?')})", "dmidecode"),
+            _row("Kernel (now)", sysinfo.get("kernel"), "system"),
+            _row("PVE (now)", sysinfo.get("pveversion"), "pveversion"),
+        ],
+    })
+
+    for iface in data.get("network") or []:
+        eth = iface.get("ethtool") or {}
+        sections.append({
+            "id": f"net-{iface.get('name')}",
+            "title": f"Network: {iface.get('name')}",
+            "rows": [
+                _row("Operstate (now)", iface.get("operstate"), "sysfs"),
+                _row("Link (now)", "up" if iface.get("carrier") == 1 else "down", "sysfs"),
+                _row("Speed (now)", eth.get("Speed") or iface.get("speed_mbps"), "ethtool"),
+                _row("Driver", iface.get("driver"), "ethtool"),
+            ],
+        })
+
+    sens = (data.get("sensors") or {}).get("normalized") or {}
+    if sens.get("temperatures"):
+        sections.append({
+            "id": "temps",
+            "title": "Temperatures",
+            "rows": [_row(t.get("label") or t.get("chip"), f"{t.get('value_c')} °C", "sensors") for t in sens["temperatures"][:12]],
+        })
+    pwr = data.get("power") or {}
+    if pwr.get("package_watts") is not None:
+        sections.append({
+            "id": "power",
+            "title": "Power",
+            "rows": [_row("CPU package (now)", f"{pwr.get('package_watts')} W", "rapl")],
+        })
+    return sections
 
 
 def collect_lscpu() -> dict[str, Any]:
@@ -414,7 +704,7 @@ def profile_catalog(cpu: dict[str, Any]) -> dict[str, Any]:
 def collect_full() -> dict[str, Any]:
     cpu = collect_cpus()
     sensors = collect_sensors()
-    return {
+    payload = {
         "meta": {
             "name": "Proxmox CPU Dashboard",
             "version": VERSION,
@@ -427,10 +717,17 @@ def collect_full() -> dict[str, Any]:
         "power": collect_powercap(),
         "memory": collect_memory(),
         "block": collect_block(),
+        "storage": collect_storage(),
+        "diskstats": collect_diskstats(),
+        "platform": collect_platform(),
+        "memory_modules": collect_memory_modules(),
+        "network": collect_network(),
         "lscpu": collect_lscpu(),
         "capabilities": collect_capabilities(cpu),
         "profiles": profile_catalog(cpu),
     }
+    payload["inventory"] = build_inventory(payload)
+    return payload
 
 
 def collect_compact() -> dict[str, Any]:
@@ -460,6 +757,12 @@ def collect_compact() -> dict[str, Any]:
             "per_core_freq": [m * 1000 for m in cpu["frequency"].get("per_core_mhz", []) if m],
         },
         "cpus": {"online": cpu["online"], "total": cpu["total"]},
+        "storage": full.get("storage"),
+        "diskstats": full.get("diskstats"),
+        "platform": full.get("platform"),
+        "memory_modules": full.get("memory_modules"),
+        "network": full.get("network"),
+        "inventory": full.get("inventory"),
     }
 
 

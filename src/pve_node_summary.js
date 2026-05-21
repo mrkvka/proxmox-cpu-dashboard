@@ -1,8 +1,24 @@
-/* Proxmox CPU Dashboard v2 — native PVE API (:8006, ACL + CSRF). */
+/* Proxmox CPU Dashboard v2.1 — native API + inventory tables */
 var PVECPUDash = (function() {
     function ensureStyle() {
         if (document.getElementById('pve-hw-dash-style')) return;
-        var css = '.pve-hw-row{padding-bottom:8px!important}.pve-hw-row .right-aligned{float:none!important;display:block!important;margin-left:160px;text-align:left!important}.pve-hw-row .left-aligned{width:145px}.pve-hw-html{font-size:12px;line-height:1.35}.pve-hw-metric{display:inline-flex;border:1px solid rgba(128,128,128,.35);border-left:3px solid #2f80ed;border-radius:4px;padding:4px 7px;margin:0 6px 6px 0}.pve-hw-metric--ok{border-left-color:#23a55a}.pve-hw-metric--warn{border-left-color:#d97706}.pve-hw-metric--danger{border-left-color:#dc2626}.pve-hw-chip{display:inline-block;border:1px solid rgba(128,128,128,.35);border-radius:4px;padding:3px 7px;margin:0 5px 5px 0;font-size:11px}.pve-hw-panel{margin:4px 10px 8px;padding:8px 10px!important;border:1px solid rgba(128,128,128,.35);border-radius:4px}.pve-hw-label{font-size:10px;font-weight:700;text-transform:uppercase;opacity:.7}';
+        var css = [
+            '.pve-hw-row{padding-bottom:10px!important}',
+            '.pve-hw-row .right-aligned{float:none!important;display:block!important;margin-left:155px;text-align:left!important;max-width:calc(100% - 160px)}',
+            '.pve-hw-row .left-aligned{width:150px;white-space:nowrap;font-weight:600}',
+            '.pve-hw-wrap{font-size:11px;line-height:1.4;color:inherit;max-height:420px;overflow:auto}',
+            '.pve-hw-table{width:100%;border-collapse:collapse;margin:0 0 10px 0}',
+            '.pve-hw-table th,.pve-hw-table td{border:1px solid rgba(128,128,128,.35);padding:4px 8px;text-align:left;vertical-align:top}',
+            '.pve-hw-table th{font-size:10px;text-transform:uppercase;opacity:.75;background:rgba(128,128,128,.12)}',
+            '.pve-hw-table td.param{width:42%;font-weight:600}',
+            '.pve-hw-table td.cur{width:48%}',
+            '.pve-hw-table td.src{width:10%;font-size:9px;opacity:.55}',
+            '.pve-hw-h3{margin:10px 0 4px;font-size:11px;font-weight:700;text-transform:uppercase;opacity:.8}',
+            '.pve-hw-panel{margin:4px 10px 8px;padding:8px 10px!important;border:1px solid rgba(128,128,128,.35);border-radius:4px}',
+            '.pve-hw-label{font-size:10px;font-weight:700;text-transform:uppercase;opacity:.7}',
+            '.pve-hw-row-warn td.cur{color:#d97706}',
+            '.pve-hw-row-danger td.cur{color:#dc2626}'
+        ].join('');
         var s = document.createElement('style');
         s.id = 'pve-hw-dash-style';
         s.textContent = css;
@@ -18,9 +34,64 @@ var PVECPUDash = (function() {
     function parseState(v) {
         if (!v) return {};
         var d = v;
-        if (typeof d !== 'object') d = JSON.parse(String(d).trim());
+        if (typeof d !== 'object') d = JSON.parse(String(v).trim());
         if (typeof d === 'string') d = JSON.parse(d.trim());
         return d || {};
+    }
+
+    function rowClass(param, current) {
+        var p = String(param).toLowerCase();
+        var c = String(current);
+        if (p.indexOf('temperature') >= 0 || p.indexOf('temp') >= 0) {
+            var n = parseFloat(c);
+            if (n >= 80) return 'pve-hw-row-danger';
+            if (n >= 65) return 'pve-hw-row-warn';
+        }
+        if (p.indexOf('wear') >= 0) {
+            var w = parseFloat(c);
+            if (w >= 80) return 'pve-hw-row-danger';
+            if (w >= 50) return 'pve-hw-row-warn';
+        }
+        if (p.indexOf('online') >= 0 && c.indexOf('/') >= 0) {
+            var parts = c.split('/');
+            if (parts.length === 2 && parseInt(parts[0], 10) < parseInt(parts[1], 10)) {
+                return 'pve-hw-row-warn';
+            }
+        }
+        return '';
+    }
+
+    function renderInventory(sections) {
+        if (!sections || !sections.length) {
+            return '<div class="pve-hw-wrap"><span>—</span></div>';
+        }
+        var html = ['<div class="pve-hw-wrap">'];
+        sections.forEach(function(section) {
+            html.push('<div class="pve-hw-h3">' + esc(section.title || section.id) + '</div>');
+            html.push('<table class="pve-hw-table"><thead><tr>' +
+                '<th>' + gettext('Parameter') + '</th>' +
+                '<th>' + gettext('Current') + '</th>' +
+                '<th>' + gettext('Source') + '</th>' +
+                '</tr></thead><tbody>');
+            (section.rows || []).forEach(function(row) {
+                var cls = rowClass(row.parameter, row.current);
+                html.push('<tr class="' + cls + '">' +
+                    '<td class="param">' + esc(row.parameter) + '</td>' +
+                    '<td class="cur">' + esc(row.current) + '</td>' +
+                    '<td class="src">' + esc(row.source || '') + '</td>' +
+                    '</tr>');
+            });
+            html.push('</tbody></table>');
+        });
+        html.push('</div>');
+        return html.join('');
+    }
+
+    function renderAllInventory(data) {
+        if (data.inventory && data.inventory.length) {
+            return renderInventory(data.inventory);
+        }
+        return '<div class="pve-hw-wrap">' + gettext('Loading hardware inventory…') + '</div>';
     }
 
     function freqOf(data) {
@@ -29,11 +100,8 @@ var PVECPUDash = (function() {
         return {
             governor: cf.governor,
             available_governors: cf.available_governors || [],
-            current_khz: cf.current_khz || cf.scaling_cur_freq,
             max_khz: cf.max_khz || cf.scaling_max_freq,
-            hw_min_khz: cf.hw_min_khz || cf.cpuinfo_min_freq,
-            hw_max_khz: cf.hw_max_khz || cf.cpuinfo_max_freq,
-            per_core_mhz: (cf.per_core_freq || []).map(function(f) { return Math.round(f / 1000); })
+            current_khz: cf.current_khz || cf.scaling_cur_freq
         };
     }
 
@@ -41,60 +109,27 @@ var PVECPUDash = (function() {
         return data.cpu || data.cpus || {};
     }
 
-    function metric(title, value, tone) {
-        return '<span class="pve-hw-metric pve-hw-metric--' + (tone || 'ok') + '"><b>' + esc(title) + ':</b> ' + esc(value) + '</span>';
-    }
-
-    function renderTemps(data) {
-        var temps = (data.sensors && data.sensors.temperatures) ||
-            (data.sensors && data.sensors.normalized && data.sensors.normalized.temperatures) || [];
-        if (!temps.length) return '<span class="pve-hw-chip">No sensors</span>';
-        return '<div class="pve-hw-html">' + temps.map(function(t) {
-            var c = t.value_c != null ? t.value_c : t.value;
-            var tone = c >= 80 ? 'danger' : (c >= 65 ? 'warn' : 'ok');
-            return metric(t.label || t.chip, c + ' °C', tone);
-        }).join('') + '</div>';
-    }
-
-    function renderFans(data) {
-        var fans = (data.sensors && data.sensors.fans) ||
-            (data.sensors && data.sensors.normalized && data.sensors.normalized.fans) || [];
-        if (!fans.length) return '<span class="pve-hw-chip">No fans</span>';
-        return fans.map(function(f) {
-            return '<span class="pve-hw-chip">' + esc(f.label) + ': <b>' + esc(f.rpm) + ' RPM</b></span>';
-        }).join(' ');
-    }
-
-    function renderCpu(data) {
-        var cf = freqOf(data);
-        var cpu = cpuOf(data);
-        var html = [
-            metric('Governor', cf.governor || 'n/a', 'ok'),
-            metric('Current', Math.round((cf.current_khz || 0) / 1000) + ' MHz', 'ok'),
-            metric('Max', Math.round((cf.max_khz || 0) / 1000) + ' MHz', 'ok')
-        ];
-        if (cpu.total) {
-            html.push(metric('Online CPUs', cpu.online + ' / ' + cpu.total, cpu.online < cpu.total ? 'warn' : 'ok'));
+    function repaintInventory(panel, data) {
+        panel._pveHwData = data;
+        var widget = panel.down('#pveHwInventory');
+        if (widget && widget.getEl) {
+            var right = widget.getEl().down('.right-aligned');
+            if (right) right.setHtml(PVECPUDash.renderAllInventory(data));
         }
-        if (data.power && data.power.package_watts != null) {
-            html.push(metric('Power', data.power.package_watts + ' W', 'ok'));
-        }
-        if (cf.per_core_mhz && cf.per_core_mhz.length) {
-            html.push(cf.per_core_mhz.map(function(m, i) {
-                return '<span class="pve-hw-chip">C' + i + ': ' + m + ' MHz</span>';
-            }).join(''));
-        }
-        return '<div class="pve-hw-html">' + html.join('') + '</div>';
     }
 
-    function apiPost(url, params, ok, fail) {
+    function fetchFull(panel, cb) {
+        var node = panel.pveSelNode.data.node;
         Proxmox.Utils.API2Request({
-            url: url,
-            method: 'POST',
-            params: params,
-            success: ok,
-            failure: fail || function(r) {
-                Ext.Msg.alert(gettext('Error'), r.htmlStatus || gettext('Request failed'));
+            url: '/nodes/' + encodeURIComponent(node) + '/hw',
+            method: 'GET',
+            success: function(resp) {
+                var data = (resp.result && resp.result.data) ? resp.result.data : (resp.result || {});
+                repaintInventory(panel, data);
+                if (cb) cb(data);
+            },
+            failure: function() {
+                if (cb) cb(panel._pveHwData || {});
             }
         });
     }
@@ -104,22 +139,48 @@ var PVECPUDash = (function() {
         var base = '/nodes/' + encodeURIComponent(node);
         var done = function() {
             Ext.Msg.alert(gettext('Success'), gettext('Settings applied'));
-            var store = panel.getStore && panel.getStore();
-            if (store) store.load();
+            fetchFull(panel, function() {
+                var store = panel.getStore && panel.getStore();
+                if (store) store.load();
+                var inv = panel.down('#pveHwInventory');
+                if (inv && inv.update) inv.update(panel._pveHwData);
+            });
         };
         var stepCpufreq = function() {
             if (!settings.governor && !settings.max_freq_khz) return done();
             var p = { node: node };
             if (settings.governor) p.governor = settings.governor;
             if (settings.max_freq_khz) p.max_freq = settings.max_freq_khz;
-            apiPost(base + '/hwcpufreq', p, done);
+            Proxmox.Utils.API2Request({
+                url: base + '/hwcpufreq',
+                method: 'POST',
+                params: p,
+                success: done,
+                failure: function(r) {
+                    Ext.Msg.alert(gettext('Error'), r.htmlStatus || gettext('Failed'));
+                }
+            });
         };
         if (settings.online_cpus) {
-            apiPost(base + '/hwcpus', { node: node, online_cpus: settings.online_cpus }, stepCpufreq);
+            Proxmox.Utils.API2Request({
+                url: base + '/hwcpus',
+                method: 'POST',
+                params: { node: node, online_cpus: settings.online_cpus },
+                success: stepCpufreq,
+                failure: function(r) {
+                    Ext.Msg.alert(gettext('Error'), r.htmlStatus || gettext('Failed'));
+                }
+            });
         } else {
-            var cpu = cpuOf(parseState(panel._pveHwData || {}));
+            var cpu = cpuOf(panel._pveHwData || {});
             if (cpu.total && cpu.online < cpu.total) {
-                apiPost(base + '/hwcpus', { node: node, online_cpus: cpu.total }, stepCpufreq);
+                Proxmox.Utils.API2Request({
+                    url: base + '/hwcpus',
+                    method: 'POST',
+                    params: { node: node, online_cpus: cpu.total },
+                    success: stepCpufreq,
+                    failure: stepCpufreq
+                });
             } else {
                 stepCpufreq();
             }
@@ -129,12 +190,13 @@ var PVECPUDash = (function() {
     return {
         ensureStyle: ensureStyle,
         parseState: parseState,
+        renderAllInventory: renderAllInventory,
+        renderInventory: renderInventory,
+        fetchFull: fetchFull,
         freqOf: freqOf,
         cpuOf: cpuOf,
-        renderTemps: renderTemps,
-        renderFans: renderFans,
-        renderCpu: renderCpu,
-        applySettings: applySettings
+        applySettings: applySettings,
+        repaintInventory: repaintInventory
     };
 })();
 
@@ -146,34 +208,35 @@ Ext.define('PVE.node.StatusView', {
         PVECPUDash.ensureStyle();
         me.callParent();
 
-        me.insert(3, { xtype: 'box', colspan: 2, padding: '0 0 8 0' });
+        me.insert(3, { xtype: 'box', colspan: 2, padding: '0 0 6 0' });
 
         me.insert(4, {
             colspan: 2,
             cls: 'pve-hw-row',
+            itemId: 'pveHwInventory',
             printBar: false,
-            title: gettext('Thermals'),
+            title: gettext('Hardware inventory'),
             textField: 'thermalstate',
             renderer: function(v) {
-                try { return PVECPUDash.renderTemps(PVECPUDash.parseState(v)); } catch (e) { return String(e); }
+                try {
+                    var data = me._pveHwData || PVECPUDash.parseState(v);
+                    return PVECPUDash.renderAllInventory(data);
+                } catch (e) {
+                    return String(e);
+                }
+            },
+            update: function(data) {
+                var el = me.getEl && me.getEl();
+                if (!el) return;
+                var widget = me.down && me.down('#pveHwInventory');
+                if (widget && widget.getEl) {
+                    var right = widget.getEl().down('.right-aligned');
+                    if (right) right.setHtml(PVECPUDash.renderAllInventory(data || {}));
+                }
             }
         });
 
         me.insert(5, {
-            colspan: 2,
-            cls: 'pve-hw-row',
-            printBar: false,
-            title: gettext('CPU Frequency'),
-            textField: 'thermalstate',
-            renderer: function(v) {
-                try {
-                    me._pveHwData = PVECPUDash.parseState(v);
-                    return PVECPUDash.renderCpu(me._pveHwData);
-                } catch (e) { return String(e); }
-            }
-        });
-
-        me.insert(6, {
             xtype: 'container',
             itemId: 'pve-hw-controls',
             colspan: 2,
@@ -190,7 +253,7 @@ Ext.define('PVE.node.StatusView', {
                 }, {
                     xtype: 'combo',
                     itemId: 'govCombo',
-                    width: 160,
+                    width: 150,
                     editable: false,
                     forceSelection: true,
                     queryMode: 'local',
@@ -204,7 +267,7 @@ Ext.define('PVE.node.StatusView', {
                 }, {
                     xtype: 'numberfield',
                     itemId: 'freqField',
-                    width: 110,
+                    width: 100,
                     minValue: 400,
                     maxValue: 6000,
                     step: 100
@@ -215,7 +278,7 @@ Ext.define('PVE.node.StatusView', {
                 }, {
                     xtype: 'numberfield',
                     itemId: 'onlineField',
-                    width: 80,
+                    width: 70,
                     minValue: 1,
                     maxValue: 256
                 }]
@@ -254,9 +317,11 @@ Ext.define('PVE.node.StatusView', {
                                     method: 'POST',
                                     params: { node: node, profile: name },
                                     success: function() {
-                                        Ext.Msg.alert(gettext('Success'), name);
-                                        var store = panel.getStore && panel.getStore();
-                                        if (store) store.load();
+                                        PVECPUDash.fetchFull(panel, function(data) {
+                                            var store = panel.getStore && panel.getStore();
+                                            if (store) store.load();
+                                            PVECPUDash.repaintInventory(panel, data);
+                                        });
                                     },
                                     failure: function(r) {
                                         Ext.Msg.alert(gettext('Error'), r.htmlStatus || gettext('Failed'));
@@ -265,26 +330,45 @@ Ext.define('PVE.node.StatusView', {
                             }
                         };
                     })
+                }, {
+                    xtype: 'button',
+                    text: gettext('Refresh inventory'),
+                    iconCls: 'fa fa-refresh',
+                    handler: function(btn) {
+                        var panel = btn.up('pveNodeStatus');
+                        PVECPUDash.fetchFull(panel, function(data) {
+                            PVECPUDash.repaintInventory(panel, data);
+                            var store = panel.getStore && panel.getStore();
+                            if (store) store.load();
+                        });
+                    }
                 }]
             }]
         });
 
-        me.insert(7, {
-            colspan: 2,
-            cls: 'pve-hw-row',
-            printBar: false,
-            title: gettext('Fans'),
-            textField: 'thermalstate',
-            renderer: function(v) {
-                try { return PVECPUDash.renderFans(PVECPUDash.parseState(v)); } catch (e) { return String(e); }
-            }
-        });
-
         me.on('afterrender', function() {
+            PVECPUDash.fetchFull(me, function(data) {
+                var inv = me.down('#pveHwInventory');
+                PVECPUDash.repaintInventory(me, data);
+                var cf = PVECPUDash.freqOf(data);
+                var cpu = PVECPUDash.cpuOf(data);
+                var combo = me.down('#govCombo');
+                if (combo && cf.available_governors) {
+                    combo.getStore().loadData(cf.available_governors.map(function(g) {
+                        return { value: g, text: g };
+                    }));
+                    if (cf.governor) combo.setValue(cf.governor);
+                }
+                var ff = me.down('#freqField');
+                if (ff && cf.max_khz) ff.setValue(Math.round(cf.max_khz / 1000));
+                var of = me.down('#onlineField');
+                if (of && cpu.online) of.setValue(cpu.online);
+            });
+
             var n = 0;
             var timer = setInterval(function() {
-                if (++n > 30) clearInterval(timer);
-                var rec = me.getStore && me.getStore() && me.getStore().first && me.getStore().first();
+                if (++n > 20) clearInterval(timer);
+                var rec = me.getStore && me.getStore().first && me.getStore().first();
                 if (!rec) return;
                 var val = rec.get('thermalstate');
                 if (!val) return;
@@ -292,19 +376,14 @@ Ext.define('PVE.node.StatusView', {
                 try {
                     var data = PVECPUDash.parseState(val);
                     me._pveHwData = data;
-                    var cf = PVECPUDash.freqOf(data);
-                    var cpu = PVECPUDash.cpuOf(data);
-                    var combo = me.down('#govCombo');
-                    if (combo && cf.available_governors) {
-                        combo.getStore().loadData(cf.available_governors.map(function(g) {
-                            return { value: g, text: g };
-                        }));
-                        if (cf.governor) combo.setValue(cf.governor);
+                    var inv = me.down('#pveHwInventory');
+                    if (inv && inv.update && (!data.inventory || !data.inventory.length)) {
+                        PVECPUDash.fetchFull(me, function(full) {
+                            PVECPUDash.repaintInventory(me, full);
+                        });
+                    } else if (inv && inv.update) {
+                        PVECPUDash.repaintInventory(me, data);
                     }
-                    var ff = me.down('#freqField');
-                    if (ff && cf.max_khz) ff.setValue(Math.round(cf.max_khz / 1000));
-                    var of = me.down('#onlineField');
-                    if (of && cpu.online) of.setValue(cpu.online);
                 } catch (e) { /* ignore */ }
             }, 800);
         });
