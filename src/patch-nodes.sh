@@ -1,24 +1,150 @@
 #!/bin/bash
-# Patch Nodes.pm for extended hwinfo and cpufreq POST endpoint
+# Patch PVE::API2::Nodes.pm — native hardware API on :8006 (ACL + CSRF).
+set -euo pipefail
 
 FILE="/usr/share/perl5/PVE/API2/Nodes.pm"
+MARKER="# PVE CPU Dashboard native hardware API"
 
-# 1. Replace thermalstate line to use pve-hwinfo.sh
+# thermalstate uses our collector
 sed -i 's|\$res->{thermalstate} = `sensors -jA`;|\$res->{thermalstate} = `/usr/local/bin/pve-hwinfo.sh`;|' "$FILE"
+sed -i 's|\$res->{thermalstate} = `/usr/local/bin/pve-hwinfo.sh`;|\$res->{thermalstate} = `/usr/local/bin/pve-hwinfo.sh`;|' "$FILE" 2>/dev/null || true
 
-# 2. Add cpufreq POST endpoint to PVE::API2::Nodes::Nodeinfo.
-# This must be inserted before "package PVE::API2::Nodes;". Adding it to the
-# root Nodes package either conflicts with the {node} subclass or is invisible
-# to /nodes/{node}/... requests.
-cat > /tmp/cpufreq_endpoint.pl << 'PERLCODE'
+cat > /tmp/pve-hw-endpoints.pl << 'PERLCODE'
 
-# CPU Frequency control endpoint
+# PVE CPU Dashboard native hardware API
+use JSON qw(decode_json encode_json);
+
+sub pve_hw_collect_json {
+    my $compact = shift;
+    my @cmd = ('/usr/local/bin/pve-hw-collect.py');
+    push @cmd, '--compact' if $compact;
+    my $json = '';
+    open(my $fh, '-|', @cmd) or die "failed to run pve-hw-collect.py: $!\n";
+    while (my $line = <$fh>) { $json .= $line; }
+    close($fh) or die "pve-hw-collect.py failed\n";
+    return decode_json($json);
+}
+
+sub pve_hw_apply_args {
+    my ($param) = @_;
+    my @cmd = ('/usr/local/bin/pve-hw-apply.py');
+    if (defined($param->{profile}) && $param->{profile} ne '') {
+        push @cmd, '--profile', $param->{profile};
+    }
+    if (defined($param->{governor}) && $param->{governor} ne '') {
+        push @cmd, '--governor', $param->{governor};
+    }
+    if (defined($param->{max_freq})) {
+        push @cmd, '--max-freq-khz', int($param->{max_freq});
+    }
+    if (defined($param->{online_cpus})) {
+        push @cmd, '--online-cpus', int($param->{online_cpus});
+    }
+    my $out = '';
+    open(my $fh, '-|', @cmd) or die "failed to run pve-hw-apply.py: $!\n";
+    while (my $line = <$fh>) { $out .= $line; }
+    close($fh) or die "pve-hw-apply.py failed\n";
+    return decode_json($out);
+}
+
+__PACKAGE__->register_method({
+    name => 'hw',
+    path => 'hw',
+    method => 'GET',
+    description => "Full hardware snapshot (CPU, sensors, power, memory, disks).",
+    permissions => { check => ['perm', '/nodes/{node}', ['Sys.Audit']] },
+    proxyto => 'node',
+    protected => 1,
+    parameters => {
+        additionalProperties => 0,
+        properties => {
+            node => get_standard_option('pve-node'),
+        },
+    },
+    returns => { type => 'object' },
+    code => sub {
+        my ($param) = @_;
+        return pve_hw_collect_json(0);
+    },
+});
+
+__PACKAGE__->register_method({
+    name => 'hw_cpufreq',
+    path => 'hw/cpufreq',
+    method => 'POST',
+    description => "Set CPU governor and/or max frequency (kHz).",
+    permissions => { check => ['perm', '/nodes/{node}', ['Sys.Modify']] },
+    proxyto => 'node',
+    protected => 1,
+    parameters => {
+        additionalProperties => 0,
+        properties => {
+            node => get_standard_option('pve-node'),
+            governor => { type => 'string', optional => 1 },
+            max_freq => { type => 'integer', optional => 1, description => 'Max frequency in kHz.' },
+        },
+    },
+    returns => { type => 'object' },
+    code => sub {
+        my ($param) = @_;
+        return pve_hw_apply_args($param);
+    },
+});
+
+__PACKAGE__->register_method({
+    name => 'hw_cpus',
+    path => 'hw/cpus',
+    method => 'POST',
+    description => "Set number of logical CPUs kept online.",
+    permissions => { check => ['perm', '/nodes/{node}', ['Sys.Modify']] },
+    proxyto => 'node',
+    protected => 1,
+    parameters => {
+        additionalProperties => 0,
+        properties => {
+            node => get_standard_option('pve-node'),
+            online_cpus => { type => 'integer' },
+        },
+    },
+    returns => { type => 'object' },
+    code => sub {
+        my ($param) = @_;
+        return pve_hw_apply_args($param);
+    },
+});
+
+__PACKAGE__->register_method({
+    name => 'hw_apply',
+    path => 'hw/apply',
+    method => 'POST',
+    description => "Apply profile or combined CPU settings.",
+    permissions => { check => ['perm', '/nodes/{node}', ['Sys.Modify']] },
+    proxyto => 'node',
+    protected => 1,
+    parameters => {
+        additionalProperties => 0,
+        properties => {
+            node => get_standard_option('pve-node'),
+            profile => { type => 'string', optional => 1 },
+            governor => { type => 'string', optional => 1 },
+            max_freq => { type => 'integer', optional => 1 },
+            online_cpus => { type => 'integer', optional => 1 },
+        },
+    },
+    returns => { type => 'object' },
+    code => sub {
+        my ($param) = @_;
+        return pve_hw_apply_args($param);
+    },
+});
+
+# Legacy alias kept for older UI integrations
 __PACKAGE__->register_method({
     name => 'cpufreq',
     path => 'cpufreq',
     method => 'POST',
-    description => "Set CPU frequency governor and max frequency",
-    permissions => { check => ['perm', '/nodes/{node}', [ 'Sys.Modify' ]] },
+    description => "Set CPU governor and max frequency (legacy path).",
+    permissions => { check => ['perm', '/nodes/{node}', ['Sys.Modify']] },
     proxyto => 'node',
     protected => 1,
     parameters => {
@@ -29,48 +155,35 @@ __PACKAGE__->register_method({
             max_freq => { type => 'integer', optional => 1 },
         },
     },
-    returns => { type => 'null' },
+    returns => { type => 'object' },
     code => sub {
         my ($param) = @_;
-        my @valid_govs = qw(conservative ondemand userspace powersave performance schedutil);
-        if (defined($param->{governor})) {
-            my $gov = $param->{governor};
-            die "invalid governor '$gov'\n" unless grep { $_ eq $gov } @valid_govs;
-            system('/usr/local/bin/pve-cpufreq-set.sh', $gov, '') == 0
-                or die "failed to set governor\n";
-        }
-        if (defined($param->{max_freq})) {
-            my $freq = int($param->{max_freq});
-            die "invalid frequency\n" if $freq < 100000 || $freq > 10000000;
-            system('/usr/local/bin/pve-cpufreq-set.sh', '', $freq) == 0
-                or die "failed to set max frequency\n";
-        }
-        return undef;
+        return pve_hw_apply_args($param);
     },
 });
 
 PERLCODE
 
-# Remove a previous cpufreq endpoint block, regardless of whether it was
-# inserted into the right package or the old root package.
-perl -0pi -e "s/\n\n# CPU Frequency control endpoint\n\n?__PACKAGE__->register_method\(\{\n    name => 'cpufreq',\n.*?\n\}\);//s" "$FILE"
+# Remove previous dashboard blocks (old cpufreq-only or v1 markers)
+perl -0pi -e 's/\n# PVE CPU Dashboard.*?\n\}\);\n//gs' "$FILE" 2>/dev/null || true
+perl -0pi -e 's/\n# CPU Frequency control endpoint\n\n?__PACKAGE__->register_method\(\{\n    name => .cpufreq.,\n.*?\n\}\);//s' "$FILE" 2>/dev/null || true
 
-awk '
+awk -v marker="$MARKER" '
     BEGIN {
-        while ((getline line < "/tmp/cpufreq_endpoint.pl") > 0) {
-            endpoint = endpoint line "\n";
+        while ((getline line < "/tmp/pve-hw-endpoints.pl") > 0) {
+            block = block line "\n"
         }
     }
-    /^package PVE::API2::Nodes;$/ {
-        printf "%s", endpoint;
+    /^package PVE::API2::Nodes;$/ && !done {
+        printf "%s", block
+        done = 1
     }
     { print }
-' "$FILE" > /tmp/Nodes.pm.cpufreq
+' "$FILE" > /tmp/Nodes.pm.pvehw
 
-cp /tmp/Nodes.pm.cpufreq "$FILE"
+cp /tmp/Nodes.pm.pvehw "$FILE"
+rm -f /tmp/pve-hw-endpoints.pl /tmp/Nodes.pm.pvehw
 
-rm -f /tmp/cpufreq_endpoint.pl /tmp/Nodes.pm.cpufreq
 perl -c "$FILE"
-
-echo "NODES.PM PATCHED WITH CPUFREQ ENDPOINT"
-grep -c 'cpufreq' "$FILE"
+echo "Nodes.pm patched: native /nodes/{node}/hw API"
+grep -c "path => 'hw'" "$FILE" || true
