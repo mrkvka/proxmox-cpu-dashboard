@@ -1,4 +1,4 @@
-/* Proxmox CPU Dashboard v2.3 - live inventory polling */
+/* Proxmox CPU Dashboard v2.3.1 - incremental cell updates */
 var PVECPUDash = (function() {
     function ensureStyle() {
         if (document.getElementById('pve-hw-dash-style')) return;
@@ -66,14 +66,31 @@ var PVECPUDash = (function() {
         return '';
     }
 
+    function rowKey(sectionId, param) {
+        return String(sectionId || '') + '::' + String(param || '');
+    }
+
+    function escAttr(s) {
+        return esc(s).replace(/"/g, '&quot;');
+    }
+
+    function inventoryRowCount(sections) {
+        var n = 0;
+        (sections || []).forEach(function(section) {
+            n += (section.rows || []).length;
+        });
+        return n;
+    }
+
     function renderInventory(sections) {
         if (!sections || !sections.length) {
             return '<div class="pve-hw-wrap"><span>—</span></div>';
         }
         var html = ['<div class="pve-hw-wrap">'];
         sections.forEach(function(section) {
+            var sid = section.id || section.title || 'section';
             html.push('<div class="pve-hw-h3">' + esc(section.title || section.id) + '</div>');
-            html.push('<table class="pve-hw-table"><thead><tr>' +
+            html.push('<table class="pve-hw-table" data-pve-hw-section="' + escAttr(sid) + '"><thead><tr>' +
                 '<th>' + gettext('Parameter') + '</th>' +
                 '<th>' + gettext('Available') + '</th>' +
                 '<th>' + gettext('Applied now') + '</th>' +
@@ -83,7 +100,7 @@ var PVECPUDash = (function() {
                 var applied = cellValue(row);
                 var available = row.available != null ? row.available : '—';
                 var cls = rowClass(row.parameter, applied);
-                html.push('<tr class="' + cls + '">' +
+                html.push('<tr class="' + cls + '" data-pve-hw-row="' + escAttr(rowKey(sid, row.parameter)) + '">' +
                     '<td class="param">' + esc(row.parameter) + '</td>' +
                     '<td class="avail">' + esc(available) + '</td>' +
                     '<td class="applied">' + esc(applied) + '</td>' +
@@ -94,6 +111,50 @@ var PVECPUDash = (function() {
         });
         html.push('</div>');
         return html.join('');
+    }
+
+    function updateInventoryCells(wrapCmp, sections) {
+        if (!wrapCmp || !wrapCmp.dom || !sections || !sections.length) {
+            return false;
+        }
+        var wrap = wrapCmp.dom;
+        var rows = wrap.querySelectorAll('tr[data-pve-hw-row]');
+        if (!rows.length || rows.length !== inventoryRowCount(sections)) {
+            return false;
+        }
+        var rowMap = {};
+        sections.forEach(function(section) {
+            var sid = section.id || section.title || 'section';
+            (section.rows || []).forEach(function(row) {
+                rowMap[rowKey(sid, row.parameter)] = row;
+            });
+        });
+        var hits = 0;
+        Ext.Array.forEach(rows, function(tr) {
+            var key = tr.getAttribute('data-pve-hw-row');
+            var row = rowMap[key];
+            if (!row) return;
+            hits++;
+            var applied = String(cellValue(row));
+            var available = String(row.available != null ? row.available : '—');
+            var cls = rowClass(row.parameter, applied);
+            if (tr.className !== cls) tr.className = cls;
+            var availTd = tr.querySelector('td.avail');
+            var appliedTd = tr.querySelector('td.applied');
+            if (availTd && availTd.textContent !== available) availTd.textContent = available;
+            if (appliedTd && appliedTd.textContent !== applied) appliedTd.textContent = applied;
+        });
+        return hits === rows.length;
+    }
+
+    function setInventoryHtml(rightCmp, html) {
+        if (!rightCmp) return;
+        var scrollTop = 0;
+        var oldWrap = rightCmp.down('.pve-hw-wrap');
+        if (oldWrap && oldWrap.dom) scrollTop = oldWrap.dom.scrollTop;
+        rightCmp.setHtml(html);
+        var newWrap = rightCmp.down('.pve-hw-wrap');
+        if (newWrap && newWrap.dom) newWrap.dom.scrollTop = scrollTop;
     }
 
     function renderAllInventory(data) {
@@ -126,12 +187,19 @@ var PVECPUDash = (function() {
         var cpu = cpuOf(data);
         var combo = panel.down('#govCombo');
         if (combo && cf.available_governors && cf.available_governors.length) {
-            var cur = combo.getValue();
-            combo.getStore().loadData(cf.available_governors.map(function(g) {
-                return { value: g, text: g };
-            }));
-            if (cf.governor) combo.setValue(cf.governor);
-            else if (cur) combo.setValue(cur);
+            var store = combo.getStore();
+            var needStore = store.getCount() !== cf.available_governors.length;
+            if (!needStore) {
+                store.each(function(rec, i) {
+                    if (rec.get('value') !== cf.available_governors[i]) needStore = true;
+                });
+            }
+            if (needStore) {
+                store.loadData(cf.available_governors.map(function(g) {
+                    return { value: g, text: g };
+                }));
+            }
+            if (cf.governor && combo.getValue() !== cf.governor) combo.setValue(cf.governor);
         }
         var ff = panel.down('#freqField');
         if (ff && cf.max_khz) ff.setValue(Math.round(cf.max_khz / 1000));
@@ -201,13 +269,20 @@ var PVECPUDash = (function() {
         });
     }
 
-    function repaintInventory(panel, data) {
+    function repaintInventory(panel, data, forceFull) {
         panel._pveHwData = data;
         var widget = panel.down('#pveHwInventory');
-        if (widget && widget.getEl) {
-            var right = widget.getEl().down('.right-aligned');
-            if (right) right.setHtml(PVECPUDash.renderAllInventory(data));
+        if (!widget || !widget.getEl) return;
+        var right = widget.getEl().down('.right-aligned');
+        if (!right) return;
+        var sections = data && data.inventory;
+        var wrap = right.down('.pve-hw-wrap');
+        if (!forceFull && sections && sections.length && wrap &&
+            updateInventoryCells(wrap, sections)) {
+            return;
         }
+        setInventoryHtml(right, renderAllInventory(data));
+        panel._pveHwTableReady = !!(sections && sections.length);
     }
 
     function fetchFull(panel, cb) {
@@ -217,7 +292,7 @@ var PVECPUDash = (function() {
             method: 'GET',
             success: function(resp) {
                 var data = (resp.result && resp.result.data) ? resp.result.data : (resp.result || {});
-                repaintInventory(panel, data);
+                repaintInventory(panel, data, true);
                 if (cb) cb(data);
             },
             failure: function() {
@@ -292,7 +367,9 @@ var PVECPUDash = (function() {
         freqOf: freqOf,
         cpuOf: cpuOf,
         applySettings: applySettings,
-        repaintInventory: repaintInventory
+        repaintInventory: repaintInventory,
+        updateInventoryCells: updateInventoryCells,
+        setInventoryHtml: setInventoryHtml
     };
 })();
 
@@ -322,13 +399,7 @@ Ext.define('PVE.node.StatusView', {
                 }
             },
             update: function(data) {
-                var el = me.getEl && me.getEl();
-                if (!el) return;
-                var widget = me.down && me.down('#pveHwInventory');
-                if (widget && widget.getEl) {
-                    var right = widget.getEl().down('.right-aligned');
-                    if (right) right.setHtml(PVECPUDash.renderAllInventory(data || {}));
-                }
+                PVECPUDash.repaintInventory(me, data || {}, false);
             }
         });
 
@@ -434,7 +505,7 @@ Ext.define('PVE.node.StatusView', {
                     handler: function(btn) {
                         var panel = btn.up('pveNodeStatus');
                         PVECPUDash.fetchFull(panel, function(data) {
-                            PVECPUDash.repaintInventory(panel, data);
+                            PVECPUDash.repaintInventory(panel, data, true);
                             PVECPUDash.syncControls(panel, data);
                             var store = panel.getStore && panel.getStore();
                             if (store) store.load();
@@ -446,12 +517,13 @@ Ext.define('PVE.node.StatusView', {
 
         me.on('afterrender', function() {
             PVECPUDash.fetchFull(me, function(data) {
-                PVECPUDash.repaintInventory(me, data);
+                PVECPUDash.repaintInventory(me, data, true);
                 PVECPUDash.syncControls(me, data);
                 PVECPUDash.startLivePoll(me);
             });
             me.on('destroy', function() {
                 PVECPUDash.stopLivePoll(me);
+                me._pveHwTableReady = false;
             });
 
 
