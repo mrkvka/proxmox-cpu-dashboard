@@ -545,28 +545,50 @@ Ext.define('PVE.node.StatusView', {
                                 btn.setDisabled(true);
                                 btn.setText('Applying...');
 
-                                Proxmox.Utils.API2Request({
-                                    url: '/nodes/' + encodeURIComponent(node) + '/cpufreq',
-                                    method: 'POST',
-                                    params: params,
-                                    success: function() {
-                                        btn.setDisabled(false);
-                                        btn.setText('Apply');
-                                        Ext.Msg.alert(
-                                            'Success',
-                                            'CPU settings applied!<br>Governor: ' + (gov || 'unchanged') +
-                                                '<br>Max Freq: ' + (freq ? freq + ' MHz' : 'unchanged')
-                                        );
-                                        var store = panel.getStore && panel.getStore();
-                                        if (store) {
-                                            store.load();
+                                // Apply from Proxmox UI always restores full core count first.
+                                // UPS-style core offlining stays in the HA integration.
+                                var restoreCores = new Promise(function(resolve) {
+                                    var rec = panel.getStore && panel.getStore().first && panel.getStore().first();
+                                    try {
+                                        var data = rec ? JSON.parse(rec.get('thermalstate').trim()) : null;
+                                        var cpus = PVECPUDash.cpuState(data);
+                                        if (!cpus.total || cpus.online === cpus.total) {
+                                            return resolve();
                                         }
-                                    },
-                                    failure: function(response) {
-                                        btn.setDisabled(false);
-                                        btn.setText('Apply');
-                                        Ext.Msg.alert('Error', response.htmlStatus || response.result || 'CPU settings failed');
+                                        var xhr2 = new XMLHttpRequest();
+                                        xhr2.open('POST', 'http://' + window.location.hostname + ':8087/cpus');
+                                        xhr2.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+                                        xhr2.onloadend = function() { resolve(); };
+                                        xhr2.send('online=' + cpus.total);
+                                    } catch (e) {
+                                        resolve();
                                     }
+                                });
+
+                                restoreCores.then(function() {
+                                    Proxmox.Utils.API2Request({
+                                        url: '/nodes/' + encodeURIComponent(node) + '/cpufreq',
+                                        method: 'POST',
+                                        params: params,
+                                        success: function() {
+                                            btn.setDisabled(false);
+                                            btn.setText('Apply');
+                                            Ext.Msg.alert(
+                                                'Success',
+                                                'CPU settings applied!<br>Governor: ' + (gov || 'unchanged') +
+                                                    '<br>Max Freq: ' + (freq ? freq + ' MHz' : 'unchanged')
+                                            );
+                                            var store = panel.getStore && panel.getStore();
+                                            if (store) {
+                                                store.load();
+                                            }
+                                        },
+                                        failure: function(response) {
+                                            btn.setDisabled(false);
+                                            btn.setText('Apply');
+                                            Ext.Msg.alert('Error', response.htmlStatus || response.result || 'CPU settings failed');
+                                        }
+                                    });
                                 });
                             }
                         },

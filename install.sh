@@ -85,11 +85,14 @@ else
     fi
 fi
 
-# Add or refresh cpufreq POST endpoint. The patch script is idempotent and also
-# repairs older installs where the endpoint was inserted into the wrong package.
-echo "[*] Adding cpufreq API endpoint..."
-bash "$SRC/patch-nodes.sh"
-echo "    cpufreq endpoint ready"
+# Add cpufreq POST endpoint
+if grep -q 'cpufreq' "$NODES_PM"; then
+    echo "    Already patched (cpufreq endpoint) - skipping"
+else
+    echo "[*] Adding cpufreq API endpoint..."
+    bash "$SRC/patch-nodes.sh"
+    echo "    cpufreq endpoint added"
+fi
 
 # Install JS override
 echo "[*] Installing JS frontend..."
@@ -124,11 +127,10 @@ echo "   - Fans (if available)"
 echo ""
 echo " Press Ctrl+Shift+R in browser to force reload."
 echo ""
-echo " API endpoints:"
-echo "   GET  http://$(hostname -I | awk '{print $1}'):8087/health"
-echo "   GET  http://$(hostname -I | awk '{print $1}'):8087/status"
-echo "   POST http://$(hostname -I | awk '{print $1}'):8087/cpufreq"
+HOST_IP=$(hostname -I | awk '{print $1}')
+echo " API (v0.5.0) on http://${HOST_IP}:8087"
+echo "   GET  /health  /status  /api/v1/status  /api/v1/profiles"
+echo "   POST /cpufreq  /cpus  /api/v1/apply"
 echo ""
-echo " Home Assistant: add this repo as a HACS Custom Repository,"
-echo " or copy custom_components/proxmox_cpu_ctl/ to HA's /config/custom_components/"
+echo " Home Assistant: https://github.com/mrkvka/ha-proxmox-cpu-ctl"
 echo ""
