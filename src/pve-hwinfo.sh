@@ -1,4 +1,17 @@
 #!/bin/bash
+# Compatibility helper for the Proxmox Nodes.pm patch.
+#
+# Prefer the Python API because it owns the full hardware schema and validation
+# logic. If the API is not running, fall back to the original lightweight
+# sensors/sysfs JSON so the Summary page still has something to render.
+if command -v curl >/dev/null 2>&1; then
+  API_STATUS=$(curl -fsS --max-time 2 http://127.0.0.1:8087/api/v1/status 2>/dev/null || true)
+  if [ -n "$API_STATUS" ]; then
+    echo "$API_STATUS"
+    exit 0
+  fi
+fi
+
 SENSORS=$(sensors -jA 2>/dev/null)
 GOV=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null)
 AVAIL_GOV=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors 2>/dev/null)

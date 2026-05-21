@@ -26,9 +26,16 @@ cp "$INDEX_BAK" /usr/share/pve-manager/index.html.tpl
 echo "[*] Removing JS override..."
 rm -f /usr/share/pve-manager/js/pve_node_summary.js
 
+echo "[*] Stopping API service..."
+systemctl disable --now pve-cpufreq-api.service 2>/dev/null || true
+
 echo "[*] Removing helper scripts..."
 rm -f /usr/local/bin/pve-hwinfo.sh
 rm -f /usr/local/bin/pve-cpufreq-set.sh
+rm -f /usr/local/bin/pve-cpus-set.sh
+rm -f /usr/local/bin/pve-cpufreq-api.py
+rm -f /etc/systemd/system/pve-cpufreq-api.service
+systemctl daemon-reload
 
 echo "[*] Restarting pveproxy..."
 systemctl restart pveproxy

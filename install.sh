@@ -85,14 +85,11 @@ else
     fi
 fi
 
-# Add cpufreq POST endpoint
-if grep -q 'cpufreq' "$NODES_PM"; then
-    echo "    Already patched (cpufreq endpoint) - skipping"
-else
-    echo "[*] Adding cpufreq API endpoint..."
-    bash "$SRC/patch-nodes.sh"
-    echo "    cpufreq endpoint added"
-fi
+# Add or refresh cpufreq POST endpoint. The patch script is idempotent and also
+# repairs older installs where the endpoint was inserted into the wrong package.
+echo "[*] Adding cpufreq API endpoint..."
+bash "$SRC/patch-nodes.sh"
+echo "    cpufreq endpoint ready"
 
 # Install JS override
 echo "[*] Installing JS frontend..."
