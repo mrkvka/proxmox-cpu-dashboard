@@ -34,19 +34,17 @@ install -m 755 "$SRC/pve-hwinfo.sh" /usr/local/bin/pve-hwinfo.sh
 install -m 755 "$SRC/pve-cpufreq-set.sh" /usr/local/bin/pve-cpufreq-set.sh
 install -m 755 "$SRC/pve-cpus-set.sh" /usr/local/bin/pve-cpus-set.sh
 
-# Retire legacy sidecar if present
 if systemctl is-enabled pve-cpufreq-api.service &>/dev/null; then
     echo "[*] Disabling legacy pve-cpufreq-api (:8087)..."
     systemctl disable --now pve-cpufreq-api.service || true
 fi
-rm -f /etc/systemd/system/pve-cpufreq-api.service
-rm -f /usr/local/bin/pve-cpufreq-api.py
+rm -f /etc/systemd/system/pve-cpufreq-api.service /usr/local/bin/pve-cpufreq-api.py
 systemctl daemon-reload 2>/dev/null || true
 
 echo "[*] Testing collector..."
 /usr/local/bin/pve-hw-collect.py --compact | python3 -c "import sys,json; d=json.load(sys.stdin); assert d['meta']['version']; print('    OK', d['meta']['version'], 'cpus', d['cpu']['online'], '/', d['cpu']['total'])"
 
-echo "[*] Patching Nodes.pm (native /nodes/{node}/hw API)..."
+echo "[*] Patching Nodes.pm (native API)..."
 bash "$SRC/patch-nodes.sh"
 
 echo "[*] Installing Summary UI..."
@@ -56,8 +54,8 @@ if ! grep -q 'pve_node_summary.js' "$INDEX_TPL"; then
     sed -i '/pvemanagerlib.js/a\    <script type="text\/javascript" src="\/pve2\/js\/pve_node_summary.js?ver=2.0"><\/script>' "$INDEX_TPL"
 fi
 
-echo "[*] Restarting pveproxy..."
-systemctl restart pveproxy
+echo "[*] Restarting pvedaemon + pveproxy (required for new API routes)..."
+systemctl restart pvedaemon pveproxy
 
 echo ""
 echo "=========================================="
@@ -65,5 +63,4 @@ echo " Installation complete (native API v2)"
 echo "=========================================="
 echo "  UI: Node -> Summary (Ctrl+Shift+R)"
 echo "  API: https://$(hostname -f):8006/api2/json/nodes/$(hostname -s)/hw"
-echo "  Auth: PVE session or API token (Sys.Audit / Sys.Modify)"
 echo ""

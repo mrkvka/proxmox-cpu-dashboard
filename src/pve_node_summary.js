@@ -112,14 +112,14 @@ var PVECPUDash = (function() {
             var p = { node: node };
             if (settings.governor) p.governor = settings.governor;
             if (settings.max_freq_khz) p.max_freq = settings.max_freq_khz;
-            apiPost(base + '/hw/cpufreq', p, done);
+            apiPost(base + '/hwcpufreq', p, done);
         };
         if (settings.online_cpus) {
-            apiPost(base + '/hw/cpus', { node: node, online_cpus: settings.online_cpus }, stepCpufreq);
+            apiPost(base + '/hwcpus', { node: node, online_cpus: settings.online_cpus }, stepCpufreq);
         } else {
             var cpu = cpuOf(parseState(panel._pveHwData || {}));
             if (cpu.total && cpu.online < cpu.total) {
-                apiPost(base + '/hw/cpus', { node: node, online_cpus: cpu.total }, stepCpufreq);
+                apiPost(base + '/hwcpus', { node: node, online_cpus: cpu.total }, stepCpufreq);
             } else {
                 stepCpufreq();
             }
@@ -250,7 +250,7 @@ Ext.define('PVE.node.StatusView', {
                                 var panel = this.up('pveNodeStatus');
                                 var node = panel.pveSelNode.data.node;
                                 Proxmox.Utils.API2Request({
-                                    url: '/nodes/' + encodeURIComponent(node) + '/hw/apply',
+                                    url: '/nodes/' + encodeURIComponent(node) + '/hwapply',
                                     method: 'POST',
                                     params: { node: node, profile: name },
                                     success: function() {

@@ -12,8 +12,6 @@ sed -i 's|\$res->{thermalstate} = `/usr/local/bin/pve-hwinfo.sh`;|\$res->{therma
 cat > /tmp/pve-hw-endpoints.pl << 'PERLCODE'
 
 # PVE CPU Dashboard native hardware API
-use JSON qw(decode_json encode_json);
-
 sub pve_hw_collect_json {
     my $compact = shift;
     my @cmd = ('/usr/local/bin/pve-hw-collect.py');
@@ -70,7 +68,7 @@ __PACKAGE__->register_method({
 
 __PACKAGE__->register_method({
     name => 'hw_cpufreq',
-    path => 'hw/cpufreq',
+    path => 'hwcpufreq',
     method => 'POST',
     description => "Set CPU governor and/or max frequency (kHz).",
     permissions => { check => ['perm', '/nodes/{node}', ['Sys.Modify']] },
@@ -93,7 +91,7 @@ __PACKAGE__->register_method({
 
 __PACKAGE__->register_method({
     name => 'hw_cpus',
-    path => 'hw/cpus',
+    path => 'hwcpus',
     method => 'POST',
     description => "Set number of logical CPUs kept online.",
     permissions => { check => ['perm', '/nodes/{node}', ['Sys.Modify']] },
@@ -115,7 +113,7 @@ __PACKAGE__->register_method({
 
 __PACKAGE__->register_method({
     name => 'hw_apply',
-    path => 'hw/apply',
+    path => 'hwapply',
     method => 'POST',
     description => "Apply profile or combined CPU settings.",
     permissions => { check => ['perm', '/nodes/{node}', ['Sys.Modify']] },
@@ -164,9 +162,9 @@ __PACKAGE__->register_method({
 
 PERLCODE
 
-# Remove previous dashboard blocks (old cpufreq-only or v1 markers)
-perl -0pi -e 's/\n# PVE CPU Dashboard.*?\n\}\);\n//gs' "$FILE" 2>/dev/null || true
-perl -0pi -e 's/\n# CPU Frequency control endpoint\n\n?__PACKAGE__->register_method\(\{\n    name => .cpufreq.,\n.*?\n\}\);//s' "$FILE" 2>/dev/null || true
+# Strip previous dashboard blocks (safe idempotent reinstall)
+perl -i -0777 -pe 's/\n# PVE CPU Dashboard native hardware API.*?\n(?=package PVE::API2::Nodes;\n)//s' "$FILE"
+perl -i -0777 -pe 's/\n# CPU Frequency control endpoint.*?\n\}\);\n//s' "$FILE"
 
 awk -v marker="$MARKER" '
     BEGIN {
