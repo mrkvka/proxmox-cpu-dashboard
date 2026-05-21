@@ -1,12 +1,12 @@
-/* Proxmox CPU Dashboard v2.3.5 - flash on value change */
+/* Proxmox CPU Dashboard v2.3.6 - full-height inventory, no inner scroll */
 var PVECPUDash = (function() {
     function ensureStyle() {
-        if (document.getElementById('pve-hw-dash-style')) return;
+        var existing = document.getElementById('pve-hw-dash-style');
         var css = [
-            '.pve-hw-row{padding-bottom:10px!important}',
+            '.pve-hw-row{padding-bottom:14px!important}','.pve-hw-inventory-row .right-aligned{max-width:none!important}',
             '.pve-hw-row .right-aligned{float:none!important;display:block!important;margin-left:155px;text-align:left!important;max-width:calc(100% - 160px)}',
             '.pve-hw-row .left-aligned{width:150px;white-space:nowrap;font-weight:600}',
-            '.pve-hw-wrap{font-size:11px;line-height:1.4;color:inherit;max-height:420px;overflow:auto}',
+            '.pve-hw-wrap{font-size:11px;line-height:1.4;color:inherit;max-height:none;overflow:visible}',
             '.pve-hw-table{width:100%;border-collapse:collapse;margin:0 0 10px 0}',
             '.pve-hw-table th,.pve-hw-table td{border:1px solid rgba(128,128,128,.35);padding:4px 8px;text-align:left;vertical-align:top}',
             '.pve-hw-table th{font-size:10px;text-transform:uppercase;opacity:.75;background:rgba(128,128,128,.12)}',
@@ -26,6 +26,10 @@ var PVECPUDash = (function() {
             '.pve-hw-table td.pve-hw-flash-down{animation:pve-hw-flash-down 1.4s ease-out}',
             '.pve-hw-table td.pve-hw-flash-changed{animation:pve-hw-flash-changed 1.4s ease-out}'
         ].join('');
+        if (existing) {
+            existing.textContent = css;
+            return;
+        }
         var s = document.createElement('style');
         s.id = 'pve-hw-dash-style';
         s.textContent = css;
@@ -467,7 +471,7 @@ Ext.define('PVE.node.StatusView', {
         me.insert(4, {
             xtype: 'pmxInfoWidget',
             colspan: 2,
-            cls: 'pve-hw-row',
+            cls: 'pve-hw-row pve-hw-inventory-row',
             itemId: 'pveHwInventory',
             printBar: false,
             title: gettext('Hardware inventory'),
