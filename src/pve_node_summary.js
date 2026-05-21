@@ -1,4 +1,4 @@
-/* Proxmox CPU Dashboard v2.3.3 - scroll-safe inventory host */
+/* Proxmox CPU Dashboard v2.3.4 - pmxInfoWidget + frozen updates */
 var PVECPUDash = (function() {
     function ensureStyle() {
         if (document.getElementById('pve-hw-dash-style')) return;
@@ -118,14 +118,27 @@ var PVECPUDash = (function() {
         return wrapCmp.dom ? wrapCmp.dom : wrapCmp;
     }
 
-    function inventoryHost(panel) {
-        return panel.down('#pveHwInventoryHost');
+    function inventoryWidget(panel) {
+        return panel.down('#pveHwInventory');
+    }
+
+    function inventoryRight(panel) {
+        var w = inventoryWidget(panel);
+        if (!w || !w.getEl) return null;
+        return w.getEl().down('.right-aligned');
     }
 
     function inventoryWrap(panel) {
-        var host = inventoryHost(panel);
-        if (!host || !host.getEl) return null;
-        return host.getEl().down('.pve-hw-wrap');
+        var right = inventoryRight(panel);
+        return right ? right.down('.pve-hw-wrap') : null;
+    }
+
+    function freezeInventoryWidget(panel) {
+        var w = inventoryWidget(panel);
+        if (w && !w._pveHwFrozen) {
+            w.update = Ext.emptyFn;
+            w._pveHwFrozen = true;
+        }
     }
 
     function buildRowMaps(sections) {
@@ -169,13 +182,13 @@ var PVECPUDash = (function() {
         return updated > 0 && updated >= Math.min(rows.length, inventoryRowCount(sections));
     }
 
-    function setInventoryHtml(hostCmp, html) {
-        if (!hostCmp || !hostCmp.getEl) return;
-        var el = hostCmp.getEl();
-        var oldWrap = el.down('.pve-hw-wrap');
+    function setInventoryHtml(panel, html) {
+        var right = inventoryRight(panel);
+        if (!right) return;
+        var oldWrap = right.down('.pve-hw-wrap');
         var scrollTop = oldWrap && oldWrap.dom ? oldWrap.dom.scrollTop : 0;
-        hostCmp.update(html);
-        var newWrap = hostCmp.getEl().down('.pve-hw-wrap');
+        right.setHtml(html);
+        var newWrap = right.down('.pve-hw-wrap');
         if (newWrap && newWrap.dom) newWrap.dom.scrollTop = scrollTop;
     }
 
@@ -273,15 +286,15 @@ var PVECPUDash = (function() {
 
     function repaintInventory(panel, data, forceFull) {
         panel._pveHwData = data;
-        var host = inventoryHost(panel);
-        if (!host) return;
+        if (!inventoryWidget(panel)) return;
+        freezeInventoryWidget(panel);
         var sections = data && data.inventory;
         var wrap = inventoryWrap(panel);
         if (!forceFull && sections && sections.length && wrap &&
             updateInventoryCells(wrap, sections)) {
             return;
         }
-        setInventoryHtml(host, renderAllInventory(data));
+        setInventoryHtml(panel, renderAllInventory(data));
         panel._pveHwTableReady = !!(sections && sections.length);
     }
 
@@ -370,8 +383,8 @@ var PVECPUDash = (function() {
         repaintInventory: repaintInventory,
         updateInventoryCells: updateInventoryCells,
         setInventoryHtml: setInventoryHtml,
-        inventoryHost: inventoryHost,
-        inventoryWrap: inventoryWrap
+        inventoryWrap: inventoryWrap,
+        freezeInventoryWidget: freezeInventoryWidget
     };
 })();
 
@@ -386,27 +399,17 @@ Ext.define('PVE.node.StatusView', {
         me.insert(3, { xtype: 'box', colspan: 2, padding: '0 0 6 0' });
 
         me.insert(4, {
+            xtype: 'pmxInfoWidget',
             colspan: 2,
-            itemId: 'pveHwInventoryRow',
             cls: 'pve-hw-row',
-            border: false,
-            layout: {
-                type: 'hbox',
-                align: 'stretch'
-            },
-            items: [{
-                xtype: 'box',
-                width: 150,
-                cls: 'left-aligned',
-                html: '<span style="font-weight:600">' + gettext('Hardware inventory') + '</span>'
-            }, {
-                xtype: 'box',
-                itemId: 'pveHwInventoryHost',
-                flex: 1,
-                cls: 'right-aligned',
-                style: 'display:block',
-                html: '<div class="pve-hw-wrap">' + gettext('Loading hardware inventory…') + '</div>'
-            }]
+            itemId: 'pveHwInventory',
+            printBar: false,
+            title: gettext('Hardware inventory'),
+            textField: 'thermalstate',
+            renderer: function() {
+                return '<div class="pve-hw-wrap" data-pve-hw-root="1">' +
+                    gettext('Loading hardware inventory…') + '</div>';
+            }
         });
 
         me.insert(5, {
@@ -522,6 +525,7 @@ Ext.define('PVE.node.StatusView', {
         });
 
         me.on('afterrender', function() {
+            PVECPUDash.freezeInventoryWidget(me);
             PVECPUDash.fetchFull(me, function(data) {
                 PVECPUDash.repaintInventory(me, data, true);
                 PVECPUDash.syncControls(me, data);
