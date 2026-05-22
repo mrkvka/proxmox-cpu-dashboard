@@ -294,7 +294,7 @@ action:
 Run local checks before deploying:
 
 ```bash
-bash -n install.sh uninstall.sh src/patch-nodes.sh src/pve-cpufreq-set.sh src/pve-cpus-set.sh src/pve-hwinfo.sh
+bash -n install.sh uninstall.sh scripts/pve-fix-apt.sh scripts/pve-health-check.sh src/patch-nodes.sh src/pve-cpufreq-set.sh src/pve-cpus-set.sh src/pve-hwinfo.sh
 node --check src/pve_node_summary.js
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 ```
@@ -308,6 +308,46 @@ They verify:
 - safe sysfs writes against fake files
 - dry-run profile behavior
 - legacy `/status` shape for Home Assistant
+
+---
+
+## Troubleshooting
+
+### `apt-get update` failed: exit code 100
+
+This usually happens on **fresh Proxmox** or in **Node → Updates** when the
+**enterprise** repository is enabled but you have no subscription (`401 Unauthorized`
+on `enterprise.proxmox.com`).
+
+On the Proxmox host (from this repo directory):
+
+```bash
+bash scripts/pve-fix-apt.sh          # show repos and error hints
+bash scripts/pve-fix-apt.sh --apply  # disable enterprise, enable no-subscription
+bash scripts/pve-health-check.sh     # full check (apt, dashboard, services)
+```
+
+Manual fix (replace `bookworm` with your suite from `pveversion -v` — e.g. `trixie` on PVE 9):
+
+```bash
+sed -i 's/^deb/#deb/' /etc/apt/sources.list.d/pve-enterprise.list
+echo "deb http://download.proxmox.com/debian/pve bookworm pve-no-subscription" \
+  > /etc/apt/sources.list.d/pve-no-subscription.list
+apt-get update
+```
+
+Other causes: wrong suite in `.list` files, broken `ceph.list`, or `NO_PUBKEY` — see
+`apt-get update` output and fix the matching file under `/etc/apt/sources.list.d/`.
+
+### Dashboard / API
+
+```bash
+bash scripts/pve-health-check.sh
+journalctl -u pve-cpufreq-api -n 50
+systemctl restart pveproxy
+```
+
+Browser: **Ctrl+Shift+R** on Node → Summary.
 
 ---
 

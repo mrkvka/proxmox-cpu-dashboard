@@ -17,6 +17,18 @@ if [ ! -f /usr/share/perl5/PVE/API2/Nodes.pm ]; then
     exit 1
 fi
 
+# Refresh package lists (common failure: enterprise repo without subscription)
+echo "[*] Updating package lists..."
+if ! apt-get update; then
+    echo ""
+    echo "ERROR: apt-get update failed (exit 100 is common without a PVE subscription)."
+    echo "On the Proxmox host, run:"
+    echo "  bash scripts/pve-fix-apt.sh        # diagnose"
+    echo "  bash scripts/pve-fix-apt.sh --apply # fix repos, then re-run install.sh"
+    echo ""
+    exit 1
+fi
+
 # Check if lm-sensors is installed
 if ! command -v sensors &>/dev/null; then
     echo "[*] Installing lm-sensors..."
