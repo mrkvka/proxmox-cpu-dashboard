@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC="$SCRIPT_DIR/src"
-HW_VER="2.4.2"
+HW_VER="2.5.0"
 
 echo "=========================================="
 echo " Proxmox CPU Dashboard v2 — Installer"
@@ -25,8 +25,6 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 echo "[*] Backups (bak_${TIMESTAMP})..."
 cp /usr/share/perl5/PVE/API2/Nodes.pm "/usr/share/perl5/PVE/API2/Nodes.pm.bak_${TIMESTAMP}"
 cp /usr/share/pve-manager/index.html.tpl "/usr/share/pve-manager/index.html.tpl.bak_${TIMESTAMP}"
-[ -f /usr/share/pve-manager/js/pve_node_summary.js ] && \
-    cp /usr/share/pve-manager/js/pve_node_summary.js "/usr/share/pve-manager/js/pve_node_summary.js.bak_${TIMESTAMP}"
 
 echo "[*] Installing host tools..."
 install -m 755 "$SRC/pve-hw-collect.py" /usr/local/bin/pve-hw-collect.py
@@ -48,35 +46,24 @@ echo "[*] Testing collector..."
 echo "[*] Patching Nodes.pm (native API)..."
 bash "$SRC/patch-nodes.sh"
 
-echo "[*] Installing UI (Hardware tab)..."
+echo "[*] Installing UI..."
 cp "$SRC/pve_node_summary.js" /usr/share/pve-manager/js/pve_node_summary.js
 cp "$SRC/pve_node_hardware.js" /usr/share/pve-manager/js/pve_node_hardware.js
 
 INDEX_TPL="/usr/share/pve-manager/index.html.tpl"
-link_hw_js() {
-    local js="$1"
-    local tag="    <script type=\"text/javascript\" src=\"/pve2/js/${js}?ver=${HW_VER}\"></script>"
-    if grep -q "/pve2/js/${js}" "$INDEX_TPL"; then
-        sed -i "s|/pve2/js/${js}?ver=[^\"']*|/pve2/js/${js}?ver=${HW_VER}|g" "$INDEX_TPL"
-        echo "    Updated $js in index.html.tpl"
-    else
-        sed -i "\|pve2/js/pvemanagerlib.js|a\\${tag}" "$INDEX_TPL"
-        echo "    Linked $js in index.html.tpl"
-    fi
-}
-link_hw_js pve_node_summary.js
-link_hw_js pve_node_hardware.js
-for js in pve_node_summary.js pve_node_hardware.js; do
-    grep -q "/pve2/js/${js}" "$INDEX_TPL" || { echo "ERROR: ${js} not in index.html.tpl"; exit 1; }
-done
+sed -i '\|/pve2/js/pve_node_summary.js|d' "$INDEX_TPL"
+sed -i '\|/pve2/js/pve_node_hardware.js|d' "$INDEX_TPL"
+SUM_TAG="    <script type=\"text/javascript\" src=\"/pve2/js/pve_node_summary.js?ver=${HW_VER}\"></script>"
+HW_TAG="    <script type=\"text/javascript\" src=\"/pve2/js/pve_node_hardware.js?ver=${HW_VER}\"></script>"
+sed -i "\|pve2/js/pvemanagerlib.js|a\\${SUM_TAG}" "$INDEX_TPL"
+sed -i "\|pve2/js/pve_node_summary.js|a\\${HW_TAG}" "$INDEX_TPL"
+grep -q pve_node_summary.js "$INDEX_TPL" && grep -q pve_node_hardware.js "$INDEX_TPL"
+echo "    Scripts linked (summary -> hardware)"
 
-echo "[*] Restarting pvedaemon + pveproxy (required for new API routes)..."
+echo "[*] Restarting pvedaemon + pveproxy..."
 systemctl restart pvedaemon pveproxy
 
 echo ""
-echo "=========================================="
-echo " Installation complete (native API v2)"
-echo "=========================================="
-echo "  UI: Node -> Hardware tab (2nd, under Summary)"
-echo "  Hard refresh: Ctrl+Shift+R"
+echo " Done. Node menu: Summary, Hardware (2nd), ..."
+echo " Ctrl+Shift+R in browser"
 echo ""

@@ -158,63 +158,32 @@ Ext.define('PVE.node.HardwareView', {
     },
 });
 
-Ext.define('PVE.node.Config', {
-    override: 'PVE.node.Config',
+/* Insert Hardware tab right after Summary in the node menu tree */
+Ext.define('PVE.panel.Config', {
+    override: 'PVE.panel.Config',
 
-    repositionHardwareTab: function() {
-        var me = this;
-        var store = me.store;
-        if (!store) {
-            return;
-        }
-        var hwNode = store.getNodeById('pvehardware');
-        var summaryNode = store.getNodeById('summary');
-        if (!hwNode || !summaryNode) {
-            return;
-        }
-        var parent = summaryNode.parentNode;
-        if (!parent) {
-            return;
-        }
-        var insertIdx = parent.indexOf(summaryNode) + 1;
-        if (parent.indexOf(hwNode) === insertIdx) {
-            return;
-        }
-        parent.insertChild(insertIdx, hwNode);
-    },
-
-    ensureHardwareTab: function() {
+    insertNodes: function(items) {
         var me = this;
         var caps = Ext.state.Manager.get('GuiCap');
-        if (!caps.nodes || !caps.nodes['Sys.Audit']) {
-            return;
-        }
-        var store = me.store;
-        var root = store && store.getRoot && store.getRoot();
-        var inTree = root && root.findChild('id', 'pvehardware', true);
-        if (!inTree) {
-            if (me.savedItems && me.savedItems.pvehardware) {
-                delete me.savedItems.pvehardware;
-            }
-            me.insertNodes([{
+        var list = items || [];
+
+        if (caps.nodes && caps.nodes['Sys.Audit'] && !(me.savedItems && me.savedItems.pvehardware)) {
+            var hwTab = {
                 xtype: 'pveNodeHardware',
                 title: gettext('Hardware'),
                 iconCls: 'fa fa-microchip',
                 itemId: 'pvehardware',
-            }]);
+            };
+            var expanded = [];
+            list.forEach(function(item) {
+                expanded.push(item);
+                if (item && item.itemId === 'summary') {
+                    expanded.push(hwTab);
+                }
+            });
+            list = expanded;
         }
-        me.repositionHardwareTab();
-    },
 
-    initComponent: function() {
-        var me = this;
-        me.callParent(arguments);
-        Ext.defer(function() {
-            try {
-                me.ensureHardwareTab();
-            } catch (e) {
-                console.error('PVE Hardware tab:', e);
-            }
-        }, 50);
+        return this.callParent([list]);
     },
 });
