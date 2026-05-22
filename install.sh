@@ -4,6 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC="$SCRIPT_DIR/src"
+HW_VER="2.4.0"
 
 echo "=========================================="
 echo " Proxmox CPU Dashboard v2 — Installer"
@@ -47,12 +48,19 @@ echo "[*] Testing collector..."
 echo "[*] Patching Nodes.pm (native API)..."
 bash "$SRC/patch-nodes.sh"
 
-echo "[*] Installing Summary UI..."
+echo "[*] Installing UI (Hardware tab)..."
 cp "$SRC/pve_node_summary.js" /usr/share/pve-manager/js/pve_node_summary.js
+cp "$SRC/pve_node_hardware.js" /usr/share/pve-manager/js/pve_node_hardware.js
+
 INDEX_TPL="/usr/share/pve-manager/index.html.tpl"
-if ! grep -q 'pve_node_summary.js' "$INDEX_TPL"; then
-    sed -i '/pvemanagerlib.js/a\    <script type="text\/javascript" src="\/pve2\/js\/pve_node_summary.js?ver=2.3.6"><\/script>' "$INDEX_TPL"
-fi
+for js in pve_node_summary.js pve_node_hardware.js; do
+    if ! grep -q "$js" "$INDEX_TPL"; then
+        sed -i "/pvemanagerlib.js/a\\    <script type=\"text/javascript\" src=\"/pve2/js/${js}?ver=${HW_VER}\"></script>" "$INDEX_TPL"
+        echo "    Linked $js in index.html.tpl"
+    else
+        sed -i "s|/pve2/js/${js}?ver=[^\"]*\"|/pve2/js/${js}?ver=${HW_VER}\"|g" "$INDEX_TPL" || true
+    fi
+done
 
 echo "[*] Restarting pvedaemon + pveproxy (required for new API routes)..."
 systemctl restart pvedaemon pveproxy
@@ -61,6 +69,6 @@ echo ""
 echo "=========================================="
 echo " Installation complete (native API v2)"
 echo "=========================================="
-echo "  UI: Node -> Summary (Ctrl+Shift+R)"
-echo "  API: https://$(hostname -f):8006/api2/json/nodes/$(hostname -s)/hw"
+echo "  UI: Node -> Hardware tab (Ctrl+Shift+R)"
+echo "  Summary page is unchanged (no large table)"
 echo ""

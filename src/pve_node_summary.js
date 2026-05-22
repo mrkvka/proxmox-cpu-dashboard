@@ -1,4 +1,4 @@
-/* Proxmox CPU Dashboard v2.3.6 - full-height inventory, no inner scroll */
+/* Proxmox CPU Dashboard - shared UI module */
 var PVECPUDash = (function() {
     function ensureStyle() {
         var existing = document.getElementById('pve-hw-dash-style');
@@ -6,7 +6,7 @@ var PVECPUDash = (function() {
             '.pve-hw-row{padding-bottom:14px!important}','.pve-hw-inventory-row .right-aligned{max-width:none!important}',
             '.pve-hw-row .right-aligned{float:none!important;display:block!important;margin-left:155px;text-align:left!important;max-width:calc(100% - 160px)}',
             '.pve-hw-row .left-aligned{width:150px;white-space:nowrap;font-weight:600}',
-            '.pve-hw-wrap{font-size:11px;line-height:1.4;color:inherit;max-height:none;overflow:visible}',
+            '.pve-hw-wrap{font-size:11px;line-height:1.4;color:inherit;max-height:none;overflow:visible;width:100%}','.pve-hw-tab-panel{border:none!important}','.pve-hw-tab-scroll .x-panel-body{overflow-y:auto!important}',
             '.pve-hw-table{width:100%;border-collapse:collapse;margin:0 0 10px 0}',
             '.pve-hw-table th,.pve-hw-table td{border:1px solid rgba(128,128,128,.35);padding:4px 8px;text-align:left;vertical-align:top}',
             '.pve-hw-table th{font-size:10px;text-transform:uppercase;opacity:.75;background:rgba(128,128,128,.12)}',
@@ -128,27 +128,14 @@ var PVECPUDash = (function() {
         return wrapCmp.dom ? wrapCmp.dom : wrapCmp;
     }
 
-    function inventoryWidget(panel) {
-        return panel.down('#pveHwInventory');
-    }
-
-    function inventoryRight(panel) {
-        var w = inventoryWidget(panel);
-        if (!w || !w.getEl) return null;
-        return w.getEl().down('.right-aligned');
+    function inventoryHost(panel) {
+        return panel.down('#pveHwInventoryHost');
     }
 
     function inventoryWrap(panel) {
-        var right = inventoryRight(panel);
-        return right ? right.down('.pve-hw-wrap') : null;
-    }
-
-    function freezeInventoryWidget(panel) {
-        var w = inventoryWidget(panel);
-        if (w && !w._pveHwFrozen) {
-            w.update = Ext.emptyFn;
-            w._pveHwFrozen = true;
-        }
+        var host = inventoryHost(panel);
+        if (!host || !host.getEl) return null;
+        return host.getEl().down('.pve-hw-wrap');
     }
 
 
@@ -251,14 +238,23 @@ var PVECPUDash = (function() {
         return updated > 0 && updated >= Math.min(rows.length, inventoryRowCount(sections));
     }
 
+    function saveScroll(panel) {
+        var sc = panel.down('#pveHwScroll');
+        if (sc && sc.body && sc.body.dom) return sc.body.dom.scrollTop;
+        return 0;
+    }
+
+    function restoreScroll(panel, st) {
+        var sc = panel.down('#pveHwScroll');
+        if (sc && sc.body && sc.body.dom) sc.body.dom.scrollTop = st;
+    }
+
     function setInventoryHtml(panel, html) {
-        var right = inventoryRight(panel);
-        if (!right) return;
-        var oldWrap = right.down('.pve-hw-wrap');
-        var scrollTop = oldWrap && oldWrap.dom ? oldWrap.dom.scrollTop : 0;
-        right.setHtml(html);
-        var newWrap = right.down('.pve-hw-wrap');
-        if (newWrap && newWrap.dom) newWrap.dom.scrollTop = scrollTop;
+        var st = saveScroll(panel);
+        var host = inventoryHost(panel);
+        if (!host) return;
+        host.update(html);
+        restoreScroll(panel, st);
     }
 
     function renderAllInventory(data) {
@@ -355,8 +351,7 @@ var PVECPUDash = (function() {
 
     function repaintInventory(panel, data, forceFull) {
         panel._pveHwData = data;
-        if (!inventoryWidget(panel)) return;
-        freezeInventoryWidget(panel);
+        if (!inventoryHost(panel)) return;
         var sections = data && data.inventory;
         var wrap = inventoryWrap(panel);
         if (!forceFull && sections && sections.length && wrap &&
@@ -454,159 +449,7 @@ var PVECPUDash = (function() {
         updateInventoryCells: updateInventoryCells,
         setInventoryHtml: setInventoryHtml,
         inventoryWrap: inventoryWrap,
-        freezeInventoryWidget: freezeInventoryWidget
+        saveScroll: saveScroll,
+        restoreScroll: restoreScroll
     };
 })();
-
-Ext.define('PVE.node.StatusView', {
-    override: 'PVE.node.StatusView',
-
-    initComponent: function() {
-        var me = this;
-        PVECPUDash.ensureStyle();
-        me.callParent();
-
-        me.insert(3, { xtype: 'box', colspan: 2, padding: '0 0 6 0' });
-
-        me.insert(4, {
-            xtype: 'pmxInfoWidget',
-            colspan: 2,
-            cls: 'pve-hw-row pve-hw-inventory-row',
-            itemId: 'pveHwInventory',
-            printBar: false,
-            title: gettext('Hardware inventory'),
-            textField: 'thermalstate',
-            renderer: function() {
-                return '<div class="pve-hw-wrap" data-pve-hw-root="1">' +
-                    gettext('Loading hardware inventory…') + '</div>';
-            }
-        });
-
-        me.insert(5, {
-            xtype: 'container',
-            itemId: 'pve-hw-controls',
-            colspan: 2,
-            cls: 'pve-hw-panel',
-            layout: { type: 'vbox', align: 'stretch' },
-            items: [{
-                xtype: 'container',
-                layout: { type: 'hbox', align: 'middle' },
-                defaults: { margin: '0 10 0 0' },
-                items: [{
-                    xtype: 'label',
-                    cls: 'pve-hw-label',
-                    text: gettext('Governor')
-                }, {
-                    xtype: 'combo',
-                    itemId: 'govCombo',
-                    width: 150,
-                    editable: false,
-                    forceSelection: true,
-                    queryMode: 'local',
-                    displayField: 'text',
-                    valueField: 'value',
-                    store: { fields: ['value', 'text'], data: [] }
-                }, {
-                    xtype: 'label',
-                    cls: 'pve-hw-label',
-                    text: gettext('Max MHz')
-                }, {
-                    xtype: 'numberfield',
-                    itemId: 'freqField',
-                    width: 100,
-                    minValue: 400,
-                    maxValue: 6000,
-                    step: 100
-                }, {
-                    xtype: 'label',
-                    cls: 'pve-hw-label',
-                    text: gettext('Online CPUs')
-                }, {
-                    xtype: 'numberfield',
-                    itemId: 'onlineField',
-                    width: 70,
-                    minValue: 1,
-                    maxValue: 256
-                }]
-            }, {
-                xtype: 'container',
-                layout: { type: 'hbox' },
-                margin: '8 0 0 0',
-                defaults: { margin: '0 8 0 0' },
-                items: [{
-                    xtype: 'button',
-                    text: gettext('Apply'),
-                    iconCls: 'fa fa-check',
-                    handler: function(btn) {
-                        var panel = btn.up('pveNodeStatus');
-                        var s = {};
-                        var gov = panel.down('#govCombo').getValue();
-                        var freq = panel.down('#freqField').getValue();
-                        var online = panel.down('#onlineField').getValue();
-                        if (gov) s.governor = gov;
-                        if (freq) s.max_freq_khz = Math.round(freq * 1000);
-                        if (online) s.online_cpus = online;
-                        PVECPUDash.applySettings(panel, s);
-                    }
-                }, {
-                    xtype: 'button',
-                    text: gettext('Presets'),
-                    iconCls: 'fa fa-sliders',
-                    menu: ['performance', 'balanced', 'powersave', 'emergency', 'restore'].map(function(name) {
-                        return {
-                            text: Ext.String.capitalize(name),
-                            handler: function() {
-                                var panel = this.up('pveNodeStatus');
-                                var node = panel.pveSelNode.data.node;
-                                Proxmox.Utils.API2Request({
-                                    url: '/nodes/' + encodeURIComponent(node) + '/hwapply',
-                                    method: 'POST',
-                                    params: { node: node, profile: name },
-                                    success: function() {
-                                        PVECPUDash.fetchFull(panel, function(data) {
-                                            var store = panel.getStore && panel.getStore();
-                                            if (store) store.load();
-                                            PVECPUDash.repaintInventory(panel, data);
-                                            PVECPUDash.syncControls(panel, data);
-                                        });
-                                    },
-                                    failure: function(r) {
-                                        Ext.Msg.alert(gettext('Error'), r.htmlStatus || gettext('Failed'));
-                                    }
-                                });
-                            }
-                        };
-                    })
-                }, {
-                    xtype: 'button',
-                    text: gettext('Refresh inventory'),
-                    iconCls: 'fa fa-refresh',
-                    handler: function(btn) {
-                        var panel = btn.up('pveNodeStatus');
-                        PVECPUDash.fetchFull(panel, function(data) {
-                            PVECPUDash.repaintInventory(panel, data, true);
-                            PVECPUDash.syncControls(panel, data);
-                            var store = panel.getStore && panel.getStore();
-                            if (store) store.load();
-                        });
-                    }
-                }]
-            }]
-        });
-
-        me.on('afterrender', function() {
-            PVECPUDash.freezeInventoryWidget(me);
-            PVECPUDash.fetchFull(me, function(data) {
-                PVECPUDash.repaintInventory(me, data, true);
-                PVECPUDash.syncControls(me, data);
-                PVECPUDash.startLivePoll(me);
-            });
-            me.on('destroy', function() {
-                PVECPUDash.stopLivePoll(me);
-                me._pveHwTableReady = false;
-            });
-
-
-        });
-    }
-});
