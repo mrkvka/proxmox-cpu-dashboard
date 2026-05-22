@@ -33,3 +33,7 @@ Include:
 - `pveversion -v`  
 - Output of `bash scripts/verify-patch.sh`  
 - `perl -c /usr/share/perl5/PVE/API2/Nodes.pm`  
+
+## UI changes
+
+Edit files under `src/ui/` (load order in [docs/PLUGIN.md](docs/PLUGIN.md)). Run `bash install-ui.sh` on a test node.

@@ -28,6 +28,19 @@ class FormatterTests(unittest.TestCase):
 
     def test_fmt_mib_to_gib(self):
         self.assertIn("GiB", mod._fmt_mib_to_gib(1024))
+    def test_estimate_system_power(self):
+        est = mod.estimate_system_power(
+            cpu={"online": 8, "total": 8},
+            memory_modules=[{"size": "32 GiB"}],
+            storage=[{"rotational": "0"}, {"rotational": "1"}],
+            processor_dmi={"Max Power": "95 W"},
+            system={"loadavg": [4.0]},
+            rapl_breakdown=[],
+        )
+        self.assertEqual(est["cpu_tdp_w"], 95.0)
+        self.assertEqual(est["memory_w"], round(32 * 0.35, 1))
+        self.assertEqual(est["storage_w"], 10.5)
+        self.assertGreater(est["load_total_w"], est["idle_total_w"])
 
 
 if __name__ == "__main__":

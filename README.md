@@ -9,7 +9,7 @@ Two installable components:
 | **proxmox-node-hw-api** | `/nodes/{node}/hw*` JSON API — for scripts, monitoring, Home Assistant, etc. |
 | **proxmox-node-hw-ui** | **Node → Hardware** tab in the web UI (requires API package) |
 
-**Version:** [`VERSION`](VERSION) · **API docs:** [docs/API.md](docs/API.md)
+**Version:** [`VERSION`](VERSION) · **API docs:** [docs/API.md](docs/API.md) · [docs/PLUGIN.md](docs/PLUGIN.md)
 
 ## Install from git
 

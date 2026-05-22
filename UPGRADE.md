@@ -32,3 +32,7 @@ bash uninstall-ui.sh
 ```
 
 API endpoints remain available for external clients.
+
+## UI script rename (3.5.0+)
+
+Re-run `bash install-ui.sh` after upgrade. Legacy `pve_node_summary.js` / `pve_node_hardware.js` are removed automatically.

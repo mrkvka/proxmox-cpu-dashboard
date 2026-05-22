@@ -271,8 +271,107 @@ def collect_hwmon() -> list[dict[str, Any]]:
     return devices
 
 
-def collect_powercap() -> dict[str, Any]:
+def _zone_power_w(zone: dict[str, Any], *, sample_energy: bool) -> float | None:
+    pu = zone.get("power_uw")
+    if isinstance(pu, int) and pu > 0:
+        return round(pu / 1_000_000, 2)
+    if not sample_energy:
+        return None
+    energy_path = os.path.join(zone["path"], "energy_uj")
+    if not os.path.isfile(energy_path):
+        return None
+    e1 = read_int(energy_path)
+    t1 = time.monotonic()
+    time.sleep(0.12)
+    e2 = read_int(energy_path)
+    t2 = time.monotonic()
+    if e1 is None or e2 is None or t2 <= t1:
+        return None
+    de = e2 - e1
+    if de < 0:
+        de += read_int(os.path.join(zone["path"], "max_energy_range_uj")) or 0
+    return round((de / (t2 - t1)) / 1_000_000, 2)
+
+
+def _parse_tdp_w(cpu: dict[str, Any], processor_dmi: dict[str, str], system: dict[str, Any]) -> float:
+    for key in ("Max Power", "Maximum Power", "TDP"):
+        val = (processor_dmi or {}).get(key, "")
+        m = re.search(r"(\d+)\s*W", val, re.I)
+        if m:
+            return float(m.group(1))
+    model = (system or {}).get("processor") or info_get("model name") or ""
+    m = re.search(r"(\d{2,3})\s*W", model, re.I)
+    if m:
+        return float(m.group(1))
+    cores = int(cpu.get("online") or cpu.get("total") or 1)
+    freq = cpu.get("frequency") or {}
+    mhz = freq.get("hw_max_mhz") or freq.get("max_mhz") or 3000
+    if not isinstance(mhz, int):
+        mhz = 3000
+    return float(min(280, max(35, cores * mhz / 1000 * 10)))
+
+
+def _memory_size_gib(size_text: str) -> float:
+    m = re.match(r"^([\d.]+)\s*([KMGT])i?B", (size_text or "").strip(), re.I)
+    if not m:
+        return 0.0
+    n = float(m.group(1))
+    mult = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
+    return n * mult.get(m.group(2).upper(), 1024**3) / (1024**3)
+
+
+def estimate_system_power(
+    *,
+    cpu: dict[str, Any],
+    memory_modules: list[dict[str, Any]],
+    storage: list[dict[str, Any]],
+    processor_dmi: dict[str, str],
+    system: dict[str, Any],
+    rapl_breakdown: list[dict[str, Any]],
+) -> dict[str, Any]:
+    tdp = _parse_tdp_w(cpu, processor_dmi, system)
+    mem_gib = sum(_memory_size_gib(m.get("size", "")) for m in (memory_modules or []))
+    memory_w = round(max(4.0, mem_gib * 0.35), 1)
+    storage_w = 0.0
+    for disk in storage or []:
+        storage_w += 7.0 if disk.get("rotational") == "1" else 3.5
+    storage_w = round(storage_w, 1)
+    platform_w = 25.0
+    cores = int(cpu.get("online") or cpu.get("total") or 1)
+    load1 = float((system or {}).get("loadavg", [0.0])[0] or 0)
+    load_factor = min(1.0, load1 / max(cores, 1))
+    cpu_idle_frac = 0.25
+    cpu_at_load = round(tdp * (cpu_idle_frac + (1 - cpu_idle_frac) * load_factor), 1)
+    plimit = None
+    for item in rapl_breakdown:
+        if item.get("plimit_w"):
+            plimit = item["plimit_w"]
+            break
+    return {
+        "cpu_tdp_w": tdp,
+        "cpu_plimit_w": plimit,
+        "memory_w": memory_w,
+        "storage_w": storage_w,
+        "platform_w": platform_w,
+        "load_factor": round(load_factor, 2),
+        "cpu_at_load_w": cpu_at_load,
+        "idle_total_w": round(platform_w + memory_w + storage_w + tdp * cpu_idle_frac, 1),
+        "load_total_w": round(platform_w + memory_w + storage_w + cpu_at_load, 1),
+    }
+
+
+def collect_powercap(
+    *,
+    sensors_normalized: dict[str, Any] | None = None,
+    cpu: dict[str, Any] | None = None,
+    memory_modules: list[dict[str, Any]] | None = None,
+    storage: list[dict[str, Any]] | None = None,
+    platform: dict[str, Any] | None = None,
+    system: dict[str, Any] | None = None,
+    live: bool = False,
+) -> dict[str, Any]:
     zones = []
+    rapl_breakdown = []
     for path in sorted(glob.glob("/sys/class/powercap/*")):
         zone: dict[str, Any] = {"path": path, "name": read_text(os.path.join(path, "name")) or ""}
         for key in (
@@ -283,30 +382,80 @@ def collect_powercap() -> dict[str, Any]:
             if os.path.isfile(fpath):
                 val = read_text(fpath)
                 zone[key] = int(val) if val and val.isdigit() else val
+        pw = _zone_power_w(zone, sample_energy=not live)
+        if pw is not None:
+            zone["power_w"] = pw
+        plimit = zone.get("constraint_0_power_limit_uw")
+        if isinstance(plimit, int) and plimit > 0:
+            zone["plimit_w"] = round(plimit / 1_000_000, 1)
         zones.append(zone)
+        name_l = (zone.get("name") or "").lower()
+        if pw is not None and ("package" in name_l or "dram" in name_l or "core" in name_l or "psys" in name_l):
+            rapl_breakdown.append({
+                "name": zone.get("name") or path,
+                "power_w": pw,
+                "plimit_w": zone.get("plimit_w"),
+            })
 
-    package_energy = None
+    package_watts = None
     for z in zones:
-        if "package" in (z.get("name") or "").lower() or z["path"].endswith(":0"):
-            package_energy = os.path.join(z["path"], "energy_uj")
-            if os.path.isfile(package_energy):
+        if "package" in (z.get("name") or "").lower():
+            package_watts = z.get("power_w")
+            if package_watts is not None:
                 break
-            package_energy = None
+    if package_watts is None and rapl_breakdown:
+        package_watts = rapl_breakdown[0].get("power_w")
 
-    watts = None
-    if package_energy:
-        e1 = read_int(package_energy)
-        t1 = time.monotonic()
-        time.sleep(0.15)
-        e2 = read_int(package_energy)
-        t2 = time.monotonic()
-        if e1 is not None and e2 is not None and t2 > t1:
-            de = e2 - e1
-            if de < 0:
-                de += read_int(os.path.join(os.path.dirname(package_energy), "max_energy_range_uj")) or 0
-            watts = round((de / (t2 - t1)) / 1_000_000, 2)
+    sensor_power = (sensors_normalized or {}).get("power") or []
+    sensor_total = round(sum(p.get("value_w", 0) for p in sensor_power if isinstance(p.get("value_w"), (int, float))), 2)
+    rapl_measured = round(sum(r["power_w"] for r in rapl_breakdown if r.get("power_w") is not None), 2)
 
-    return {"zones": zones, "package_watts": watts}
+    cpu = cpu or {}
+    estimate = estimate_system_power(
+        cpu=cpu,
+        memory_modules=memory_modules or [],
+        storage=storage or [],
+        processor_dmi=(platform or {}).get("processor_dmi") or {},
+        system=system or {},
+        rapl_breakdown=rapl_breakdown,
+    )
+
+    measured_parts = []
+    if rapl_measured > 0:
+        measured_parts.append(rapl_measured)
+    if sensor_total > 0 and sensor_total > rapl_measured * 0.5:
+        measured_parts.append(sensor_total)
+    measured_total = round(sum(measured_parts), 2) if measured_parts else None
+
+    if measured_total and measured_total > 10:
+        display_w = measured_total
+        method = "measured"
+        confidence = "medium" if len(rapl_breakdown) > 1 or sensor_total else "low"
+    else:
+        display_w = estimate["load_total_w"]
+        method = "estimated"
+        confidence = "low"
+
+    if measured_total and method == "measured":
+        # Add non-CPU estimate for rest of platform if RAPL is CPU-only
+        if rapl_measured and rapl_measured < estimate["load_total_w"] * 0.6:
+            display_w = round(rapl_measured + estimate["memory_w"] + estimate["storage_w"] + estimate["platform_w"], 1)
+            method = "hybrid"
+            confidence = "medium"
+
+    return {
+        "zones": zones,
+        "package_watts": package_watts,
+        "rapl_breakdown": rapl_breakdown,
+        "rapl_measured_w": rapl_measured or None,
+        "sensor_power": sensor_power,
+        "sensor_total_w": sensor_total or None,
+        "measured_total_w": measured_total,
+        "estimate": estimate,
+        "system_watts": display_w,
+        "method": method,
+        "confidence": confidence,
+    }
 
 
 def collect_memory() -> dict[str, Any]:
@@ -745,12 +894,41 @@ def build_inventory(data: dict[str, Any]) -> list[dict[str, Any]]:
             ],
         })
     pwr = data.get("power") or {}
-    if pwr.get("package_watts") is not None:
-        sections.append({
-            "id": "power",
-            "title": "Power",
-            "rows": [_row("CPU package", "RAPL counter", f"{pwr.get('package_watts')} W", "rapl")],
-        })
+    if pwr.get("system_watts") is not None or pwr.get("package_watts") is not None:
+        est = pwr.get("estimate") or {}
+        method = pwr.get("method") or "?"
+        conf = pwr.get("confidence") or "?"
+        rows = [
+            _row(
+                "System total",
+                f"{method} ({conf})",
+                f"{pwr.get('system_watts')} W",
+                "rapl+est",
+            ),
+        ]
+        if pwr.get("package_watts") is not None:
+            rows.append(_row("CPU package", "RAPL", f"{pwr.get('package_watts')} W", "rapl"))
+        for item in (pwr.get("rapl_breakdown") or []):
+            n = (item.get("name") or "").lower()
+            if "package" in n:
+                continue
+            if item.get("power_w") is not None:
+                rows.append(_row(item.get("name") or "RAPL zone", "RAPL", f"{item.get('power_w')} W", "rapl"))
+        if est.get("memory_w"):
+            rows.append(_row("Memory", "estimate", f"{est.get('memory_w')} W", "dmidecode"))
+        if est.get("storage_w"):
+            rows.append(_row("Storage", "estimate", f"{est.get('storage_w')} W", "inventory"))
+        if est.get("platform_w"):
+            rows.append(_row("Platform", "estimate", f"{est.get('platform_w')} W", "heuristic"))
+        if est.get("cpu_tdp_w"):
+            rows.append(_row("CPU TDP", "spec / DMI", f"{est.get('cpu_tdp_w')} W", "estimate"))
+        if est.get("cpu_at_load_w"):
+            rows.append(_row("CPU @ load", f"load {est.get('load_factor')}", f"{est.get('cpu_at_load_w')} W", "estimate"))
+        if est.get("idle_total_w"):
+            rows.append(_row("Est. idle total", "heuristic", f"{est.get('idle_total_w')} W", "estimate"))
+        for sp in (pwr.get("sensor_power") or [])[:4]:
+            rows.append(_row(sp.get("label") or "Sensor", "power", f"{sp.get('value_w')} W", "sensors"))
+        sections.append({"id": "power", "title": "Power", "rows": rows})
     return sections
 
 
@@ -843,6 +1021,8 @@ def collect_live() -> dict[str, Any]:
             STATIC_CACHE.write_text(json.dumps(static, ensure_ascii=False), encoding="utf-8")
         except OSError:
             pass
+    sensors = collect_sensors()
+    system = collect_system_live()
     payload = {
         "meta": {
             "name": "Proxmox Node Hardware API",
@@ -850,10 +1030,18 @@ def collect_live() -> dict[str, Any]:
             "collected_at": int(time.time()),
             "mode": "live",
         },
-        "system": collect_system_live(),
+        "system": system,
         "cpu": cpu,
-        "sensors": collect_sensors(),
-        "power": collect_powercap(),
+        "sensors": sensors,
+        "power": collect_powercap(
+            sensors_normalized=(sensors.get("normalized") or {}),
+            cpu=cpu,
+            memory_modules=static.get("memory_modules") or collect_memory_modules(),
+            storage=storage,
+            platform=static.get("platform") or collect_platform(),
+            system=system,
+            live=True,
+        ),
         "memory": collect_memory(),
         "diskstats": collect_diskstats(),
         "network": collect_network(),
@@ -1014,23 +1202,35 @@ def profile_catalog(cpu: dict[str, Any]) -> dict[str, Any]:
 def collect_full() -> dict[str, Any]:
     cpu = collect_cpus()
     sensors = collect_sensors()
+    storage = collect_storage()
+    platform = collect_platform()
+    memory_modules = collect_memory_modules()
+    system = collect_system()
     payload = {
         "meta": {
             "name": "Proxmox Node Hardware API",
             "version": VERSION,
             "collected_at": int(time.time()),
         },
-        "system": collect_system(),
+        "system": system,
         "cpu": cpu,
         "sensors": sensors,
         "hwmon": collect_hwmon(),
-        "power": collect_powercap(),
+        "power": collect_powercap(
+            sensors_normalized=(sensors.get("normalized") or {}),
+            cpu=cpu,
+            memory_modules=memory_modules,
+            storage=storage,
+            platform=platform,
+            system=system,
+            live=False,
+        ),
         "memory": collect_memory(),
         "block": collect_block(),
-        "storage": collect_storage(),
+        "storage": storage,
         "diskstats": collect_diskstats(),
-        "platform": collect_platform(),
-        "memory_modules": collect_memory_modules(),
+        "platform": platform,
+        "memory_modules": memory_modules,
         "network": collect_network(),
         "lscpu": collect_lscpu(),
         "capabilities": collect_capabilities(cpu),
