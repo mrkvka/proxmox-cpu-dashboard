@@ -22,21 +22,18 @@ perl -i -0777 -pe 's/\n# PVE CPU Dashboard native hardware API.*?(\npackage PVE:
 perl -i -0777 -pe 's/\n# CPU Frequency control endpoint.*?\n\}\);\n//s' "$FILE" 2>/dev/null || true
 perl -i -0777 -pe 's/\n# PVE-HW-DASHBOARD: begin.*?\n# PVE-HW-DASHBOARD: end\n//s' "$FILE" 2>/dev/null || true
 
-awk -v begin="$MARKER_BEGIN" -v end="$MARKER_END" '
-    /^package PVE::API2::Nodes;$/ && !done {
-        print
-        print begin
-        print "require PVE::API2::Nodes::Hardware;"
-        print "PVE::API2::Nodes::Hardware::register_api();"
-        print end
-        done = 1
-        next
-    }
-    { print }
-' "$FILE" > /tmp/Nodes.pm.pvehw
-
-cp /tmp/Nodes.pm.pvehw "$FILE"
-rm -f /tmp/Nodes.pm.pvehw
+# Register after Nodes.pm is fully loaded (append before final "1;")
+if ! grep -qF "$MARKER_BEGIN" "$FILE"; then
+    perl -i -pe '
+        if (/^1;\s*$/ && !$done) {
+            print "'"$MARKER_BEGIN"'\n";
+            print "use PVE::API2::Nodes::Hardware;\n";
+            print "PVE::API2::Nodes::Hardware::register_api();\n";
+            print "'"$MARKER_END"'\n";
+            $done = 1;
+        }
+    ' "$FILE"
+fi
 
 perl -c "$FILE"
 echo "Nodes.pm OK: hardware API via PVE::API2::Nodes::Hardware"
