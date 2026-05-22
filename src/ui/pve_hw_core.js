@@ -1,4 +1,4 @@
-/* Proxmox CPU Dashboard - shared UI module */
+/* Proxmox Node Hardware — shared core (inventory, API, styles) */
 var PVECPUDash = (function() {
     function ensureStyle() {
         var existing = document.getElementById('pve-hw-dash-style');

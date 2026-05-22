@@ -1,4 +1,4 @@
-/* Proxmox CPU Dashboard - Hardware tab */
+/* Hardware tab panel (requires pve_hw_core.js) */
 Ext.define('PVE.node.HardwareView', {
     extend: 'Ext.panel.Panel',
     alias: 'widget.pveNodeHardware',
@@ -146,35 +146,5 @@ Ext.define('PVE.node.HardwareView', {
             me._pveHwLoaded = false;
             me._pveHwTableReady = false;
         });
-    },
-});
-
-/* Insert Hardware tab right after Summary in the node menu tree */
-Ext.define('PVE.panel.Config', {
-    override: 'PVE.panel.Config',
-
-    insertNodes: function(items) {
-        var me = this;
-        var caps = Ext.state.Manager.get('GuiCap');
-        var list = items || [];
-
-        if (caps.nodes && caps.nodes['Sys.Audit'] && !(me.savedItems && me.savedItems.pvehardware)) {
-            var hwTab = {
-                xtype: 'pveNodeHardware',
-                title: gettext('Hardware'),
-                iconCls: 'fa fa-microchip',
-                itemId: 'pvehardware',
-            };
-            var expanded = [];
-            list.forEach(function(item) {
-                expanded.push(item);
-                if (item && item.itemId === 'summary') {
-                    expanded.push(hwTab);
-                }
-            });
-            list = expanded;
-        }
-
-        return this.callParent([list]);
     },
 });

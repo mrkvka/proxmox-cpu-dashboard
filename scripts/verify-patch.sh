@@ -20,8 +20,16 @@ check "Hardware.pm installed" "test -f '$HW_PM'"
 check "API hook in Nodes.pm" "grep -qF 'PVE-HW-DASHBOARD: begin' '$NODES_PM'"
 check "collector binary" "test -x /usr/local/bin/pve-hw-collect.py"
 check "apply binary" "test -x /usr/local/bin/pve-hw-apply.py"
-check "UI summary JS" "test -f /usr/share/pve-manager/js/pve_node_summary.js"
-check "UI hardware JS" "test -f /usr/share/pve-manager/js/pve_node_hardware.js"
+MGR_JS="/usr/share/pve-manager/js"
+if [[ -f "$MGR_JS/pve_hw_core.js" ]]; then
+    check "UI plugin (core)" "test -f $MGR_JS/pve_hw_core.js"
+    check "UI plugin (tab)" "test -f $MGR_JS/pve_hw_tab.js"
+    check "UI plugin (hook)" "test -f $MGR_JS/pve_hw_plugin.js"
+elif [[ -f "$MGR_JS/pve_node_summary.js" ]]; then
+    echo "WARN: legacy UI scripts detected — run: bash install-ui.sh"
+else
+    echo "SKIP: UI not installed (API-only is OK)"
+fi
 
 if command -v pvesh >/dev/null 2>&1; then
     NODE=$(hostname -s 2>/dev/null || hostname)

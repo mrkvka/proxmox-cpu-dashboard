@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.5.0] — 2026-05-22
+
+### P2: UI plugin polish
+
+- Split UI into `src/ui/`: `pve_hw_core.js`, `pve_hw_tab.js`, `pve_hw_plugin.js`
+- `install-ui.sh` migrates legacy `pve_node_*.js` names; chained script load order
+- `docs/PLUGIN.md`, `docs/ROADMAP.md`
+
 ## [3.4.2] — 2026-05-22
 
 ### System power estimate
