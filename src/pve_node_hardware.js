@@ -163,12 +163,12 @@ Ext.define('PVE.node.Config', {
 
     repositionHardwareTab: function() {
         var me = this;
-        var root = me.store && me.store.getRoot && me.store.getRoot();
-        if (!root) {
+        var store = me.store;
+        if (!store) {
             return;
         }
-        var hwNode = root.findChild('id', 'pvehardware', true);
-        var summaryNode = root.findChild('id', 'summary', true);
+        var hwNode = store.getNodeById('pvehardware');
+        var summaryNode = store.getNodeById('summary');
         if (!hwNode || !summaryNode) {
             return;
         }
@@ -180,21 +180,22 @@ Ext.define('PVE.node.Config', {
         if (parent.indexOf(hwNode) === insertIdx) {
             return;
         }
-        var hwParent = hwNode.parentNode;
-        if (hwParent) {
-            hwParent.removeChild(hwNode, false);
-        }
         parent.insertChild(insertIdx, hwNode);
     },
 
-    initComponent: function() {
+    ensureHardwareTab: function() {
         var me = this;
-        me.callParent(arguments);
         var caps = Ext.state.Manager.get('GuiCap');
         if (!caps.nodes || !caps.nodes['Sys.Audit']) {
             return;
         }
-        if (!me.savedItems || !me.savedItems.pvehardware) {
+        var store = me.store;
+        var root = store && store.getRoot && store.getRoot();
+        var inTree = root && root.findChild('id', 'pvehardware', true);
+        if (!inTree) {
+            if (me.savedItems && me.savedItems.pvehardware) {
+                delete me.savedItems.pvehardware;
+            }
             me.insertNodes([{
                 xtype: 'pveNodeHardware',
                 title: gettext('Hardware'),
@@ -203,5 +204,17 @@ Ext.define('PVE.node.Config', {
             }]);
         }
         me.repositionHardwareTab();
+    },
+
+    initComponent: function() {
+        var me = this;
+        me.callParent(arguments);
+        Ext.defer(function() {
+            try {
+                me.ensureHardwareTab();
+            } catch (e) {
+                console.error('PVE Hardware tab:', e);
+            }
+        }, 50);
     },
 });
