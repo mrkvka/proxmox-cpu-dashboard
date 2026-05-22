@@ -1,13 +1,13 @@
 #!/bin/bash
-# Proxmox CPU Dashboard v3.1.0 — native PVE API (no :8087 sidecar)
+# Proxmox Node Hardware API v3.2.0 — native PVE API only
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC="$SCRIPT_DIR/src"
-HW_VER="3.1.0"
+HW_VER="3.2.0"
 
 echo "=========================================="
-echo " Proxmox CPU Dashboard v${HW_VER} — Installer"
+echo " Proxmox Node Hardware API v${HW_VER} — Installer"
 echo "=========================================="
 
 bash "$SCRIPT_DIR/scripts/pve-version-check.sh"
@@ -26,7 +26,6 @@ cp /usr/share/pve-manager/index.html.tpl "/usr/share/pve-manager/index.html.tpl.
 echo "[*] Installing host tools..."
 install -m 755 "$SRC/pve-hw-collect.py" /usr/local/bin/pve-hw-collect.py
 install -m 755 "$SRC/pve-hw-apply.py" /usr/local/bin/pve-hw-apply.py
-install -m 755 "$SRC/pve-hwinfo.sh" /usr/local/bin/pve-hwinfo.sh
 install -m 755 "$SRC/pve-cpufreq-set.sh" /usr/local/bin/pve-cpufreq-set.sh
 install -m 755 "$SRC/pve-cpus-set.sh" /usr/local/bin/pve-cpus-set.sh
 
@@ -37,7 +36,7 @@ if systemctl is-enabled pve-cpufreq-api.service &>/dev/null; then
     echo "[*] Disabling legacy pve-cpufreq-api (:8087)..."
     systemctl disable --now pve-cpufreq-api.service || true
 fi
-rm -f /etc/systemd/system/pve-cpufreq-api.service /usr/local/bin/pve-cpufreq-api.py
+rm -f /etc/systemd/system/pve-cpufreq-api.service /usr/local/bin/pve-cpufreq-api.py /usr/local/bin/pve-hwinfo.sh
 systemctl daemon-reload 2>/dev/null || true
 
 mkdir -p /var/cache/pve-hw-dashboard

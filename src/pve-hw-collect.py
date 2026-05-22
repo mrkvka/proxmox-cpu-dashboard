@@ -2,7 +2,7 @@
 """Collect hardware state from sysfs, lm-sensors, and powercap.
 
 Output: JSON on stdout.
-  --compact   smaller JSON for Nodes.pm thermalstate field
+  --compact   smaller JSON export
   --pretty    indented JSON (default for API GET /nodes/{node}/hw)
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-VERSION = "3.1.0"
+VERSION = "3.2.0"
 
 
 def read_text(path: str) -> str | None:

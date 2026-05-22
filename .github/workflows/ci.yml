@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [master, 'cursor/**']
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python syntax and unit tests
+        run: |
+          python3 -m py_compile src/pve-hw-collect.py src/pve-hw-apply.py
+          python3 -m unittest discover -s tests -p 'test_*.py' -v
+
+      - name: Perl module syntax
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libjson-perl
+          perl -c src/perl/PVE/API2/Nodes/Hardware.pm
+
+      - name: Shellcheck
+        run: |
+          sudo apt-get install -y shellcheck
+          shellcheck install.sh uninstall.sh scripts/*.sh src/patch-nodes.sh

@@ -1,11 +1,11 @@
 #!/bin/bash
-# Collect every CPU/thermal/power parameter exposed by sysfs, lm-sensors,
-# pve-hwinfo, and the dashboard API. Writes JSON to stdout or AUDIT_OUT file.
+# Audit sysfs + native PVE hardware API (no legacy :8087).
 set -euo pipefail
 
 AUDIT_OUT="${1:-}"
 STAMP=$(date -Iseconds)
-HOST=$(hostname)
+HOST=$(hostname -s 2>/dev/null || hostname)
+NODE="${NODE:-$HOST}"
 
 emit() {
     if [ -n "$AUDIT_OUT" ]; then
@@ -21,13 +21,12 @@ import glob
 import json
 import os
 import subprocess
-import urllib.request
 
 def read_text(path):
     try:
         with open(path) as f:
             return f.read().strip()
-    except Exception:
+    except OSError:
         return None
 
 def read_int(path):
@@ -36,12 +35,12 @@ def read_int(path):
         return None
     try:
         return int(value)
-    except Exception:
+    except ValueError:
         return None
 
 def run(cmd):
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=20, check=False)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
         return {
             "cmd": cmd,
             "returncode": result.returncode,
@@ -51,12 +50,14 @@ def run(cmd):
     except Exception as err:
         return {"cmd": cmd, "error": str(err)}
 
-def fetch_json(url):
+def pvesh_json(path):
+    out = run(["pvesh", "get", path, "--output-format", "json"])
+    if out.get("returncode") != 0:
+        return out
     try:
-        with urllib.request.urlopen(url, timeout=3) as resp:
-            return json.loads(resp.read().decode())
-    except Exception as err:
-        return {"error": str(err), "url": url}
+        return {"path": path, "data": json.loads(out["stdout"])}
+    except json.JSONDecodeError:
+        return {"path": path, "error": "invalid json", "raw": out}
 
 cpus = []
 for online_path in sorted(glob.glob("/sys/devices/system/cpu/cpu[0-9]*/online")):
@@ -76,55 +77,27 @@ for online_path in sorted(glob.glob("/sys/devices/system/cpu/cpu[0-9]*/online"))
                     freq[name] = int(text)
                 else:
                     freq[name] = text
-    topo = {}
-    topo_dir = os.path.join(cpu_dir, "topology")
-    if os.path.isdir(topo_dir):
-        for name in sorted(os.listdir(topo_dir)):
-            path = os.path.join(topo_dir, name)
-            if os.path.isfile(path):
-                topo[name] = read_text(path)
-    cpus.append({"id": cpu_id, "online": online, "cpufreq": freq, "topology": topo})
-
-powercap = []
-for base in sorted(glob.glob("/sys/class/powercap/*")):
-    entry = {"path": base}
-    for name in ("name", "energy_uj", "max_energy_range_uj", "power_uw", "enabled"):
-        path = os.path.join(base, name)
-        if os.path.isfile(path):
-            value = read_text(path)
-            entry[name] = int(value) if value and value.isdigit() else value
-    powercap.append(entry)
+    cpus.append({"id": cpu_id, "online": online, "cpufreq": freq})
 
 report = {
-    "meta": {"collected_at": "$STAMP", "hostname": "$HOST"},
+    "meta": {"collected_at": "$STAMP", "hostname": "$HOST", "node": "$NODE"},
     "commands": {
         "pveversion": run(["pveversion"]),
         "sensors_jA": run(["sensors", "-jA"]),
-        "pve_hwinfo": run(["/usr/local/bin/pve-hwinfo.sh"]),
-        "pvesh_cpufreq_dry": run(["pvesh", "help", "/nodes/$(hostname -s)/cpufreq"]),
+        "collect_pretty": run(["/usr/local/bin/pve-hw-collect.py", "--compact"]),
     },
-    "sysfs": {
-        "cpus": cpus,
-        "powercap": powercap,
+    "sysfs": {"cpus": cpus},
+    "pve_api": {
+        "hw": pvesh_json(f"/nodes/$NODE/hw"),
+        "hwlive": pvesh_json(f"/nodes/$NODE/hwlive"),
     },
-    "api": {
-        "health": fetch_json("http://127.0.0.1:8087/health"),
-        "status_legacy": fetch_json("http://127.0.0.1:8087/status"),
-        "status_v1": fetch_json("http://127.0.0.1:8087/api/v1/status"),
-        "capabilities": fetch_json("http://127.0.0.1:8087/api/v1/capabilities"),
-        "profiles": fetch_json("http://127.0.0.1:8087/api/v1/profiles"),
-    },
-    "nodes_pm": {
-        "cpufreq_blocks": int(subprocess.check_output(
-            "grep -c \"name => 'cpufreq'\" /usr/share/perl5/PVE/API2/Nodes.pm || true",
+    "install": {
+        "hardware_pm": os.path.isfile("/usr/share/perl5/PVE/API2/Nodes/Hardware.pm"),
+        "hook": int(subprocess.check_output(
+            "grep -c 'PVE-HW-DASHBOARD: begin' /usr/share/perl5/PVE/API2/Nodes.pm 2>/dev/null || echo 0",
             shell=True,
             text=True,
         ).strip() or 0),
-        "cpufreq_context": subprocess.check_output(
-            "grep -B5 \"name => 'cpufreq'\" /usr/share/perl5/PVE/API2/Nodes.pm | head -20",
-            shell=True,
-            text=True,
-        ),
     },
 }
 

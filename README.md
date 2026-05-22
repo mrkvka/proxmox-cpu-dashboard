@@ -1,59 +1,56 @@
-# Proxmox CPU Dashboard **v3.1.0**
+# Proxmox Node Hardware API
 
-Native hardware monitoring and CPU control for **Proxmox VE 9.x** via the official API (`:8006`, roles, CSRF). No sidecar on `:8087`.
+Hardware inventory and CPU control for **Proxmox VE 9.x** through the **native PVE API** (`:8006`).
 
-**Stable tag:** [`v3.1.0`](https://github.com/mrkvka/proxmox-cpu-dashboard/releases) · **Branch:** `master`
+Optional **Node → Hardware** tab in the web UI. External tools (monitoring, automation) use the same JSON API.
+
+**Docs:** [docs/API.md](docs/API.md) · **Tag:** [`v3.2.0`](https://github.com/mrkvka/proxmox-cpu-dashboard/releases)
 
 ## Compatibility
 
-| Component | Supported | Notes |
-|-----------|-----------|--------|
-| Proxmox VE | **9.0 – 9.x** | Tested on 9.2.x; run `install.sh` again after `pve-manager` upgrades |
-| CPU | Intel / AMD | cpufreq via sysfs; `schedutil` / `acpi-cpufreq` |
-| Sensors | `lm-sensors` | Installed by `install.sh` if missing |
-| Disks | `smartctl` optional | Without it: no SMART temp / lifetime GiB |
-| Browsers | HTTPS UI on :8006 | Same-origin API (no mixed content) |
-| PVE 8.x | Not supported | `Nodes.pm` layout differs |
-| Home Assistant | Separate repo | [ha-proxmox-cpu-ctl](https://github.com/mrkvka/ha-proxmox-cpu-ctl) — use API token on :8006 |
+| Component | Supported |
+|-----------|-----------|
+| Proxmox VE | 9.0 – 9.x (re-run `install.sh` after `pve-manager` upgrades) |
+| CPU | Intel / AMD (sysfs cpufreq) |
+| Sensors | `lm-sensors` (installed if missing) |
+| Disks | `smartctl` optional (SMART / lifetime GiB) |
+| PVE 8.x | Not supported |
 
-## UI
-
-| Location | Content |
-|----------|---------|
-| **Node → Summary** | Stock page (thermals from PVE as before) |
-| **Node → Hardware** | Inventory table, live 1 s refresh, governor / MHz / CPUs, presets |
-
-## API
-
-Permissions: `Sys.Audit` (read), `Sys.Modify` (write). Implementation: `/usr/share/perl5/PVE/API2/Nodes/Hardware.pm`.
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/nodes/{node}/hw` | Full hardware JSON |
-| GET | `/nodes/{node}/hwlive` | Live poll snapshot |
-| POST | `/nodes/{node}/hwapply` | Profile or combined settings |
-| POST | `/nodes/{node}/hwcpufreq` | Governor + max_freq (kHz) |
-| POST | `/nodes/{node}/hwcpus` | Online logical CPUs |
-
-See [SECURITY.md](SECURITY.md).
-
-## Install
+## Quick start
 
 ```bash
 git clone https://github.com/mrkvka/proxmox-cpu-dashboard.git
 cd proxmox-cpu-dashboard
-git checkout v3.1.0   # or master
 bash install.sh
 bash scripts/verify-patch.sh
 ```
 
-Browser: **Node → Hardware**, then **Ctrl+Shift+R**.
-
-After every **`apt upgrade pve-manager`**:
-
 ```bash
-cd proxmox-cpu-dashboard && git pull && bash install.sh
+pvesh get /nodes/$(hostname -s)/hw
+pvesh get /nodes/$(hostname -s)/hwlive
 ```
+
+Web UI: **Node → Hardware** → **Ctrl+Shift+R**.
+
+## API summary
+
+| Method | Path |
+|--------|------|
+| GET | `/nodes/{node}/hw` |
+| GET | `/nodes/{node}/hwlive` |
+| POST | `/nodes/{node}/hwapply` |
+| POST | `/nodes/{node}/hwcpufreq` |
+| POST | `/nodes/{node}/hwcpus` |
+
+Details, auth, and examples: **[docs/API.md](docs/API.md)**.
+
+## Architecture
+
+```
+Client (:8006) → pveproxy → Nodes.pm → Hardware.pm → collect.py / apply.py
+```
+
+Port **8006** is standard Proxmox — this project registers API routes and optional UI scripts.
 
 ## Uninstall
 
@@ -61,22 +58,9 @@ cd proxmox-cpu-dashboard && git pull && bash install.sh
 bash uninstall.sh
 ```
 
-Keeps `*.bak_*` backups; restores `Nodes.pm` and `index.html.tpl` when backups exist.
+## Security
 
-## Architecture
-
-```
-Browser (:8006) → pveproxy → Nodes.pm (hook) → Hardware.pm → pve-hw-collect.py / pve-hw-apply.py
-```
-
-Port **8006** is the normal Proxmox web/API port (not installed by this project).
-
-## Audit
-
-```bash
-/usr/local/bin/pve-hw-collect.py --pretty | less
-bash scripts/audit-hardware.sh
-```
+[SECURITY.md](SECURITY.md)
 
 ## Changelog
 
