@@ -1,60 +1,55 @@
-# Proxmox CPU Dashboard v2
+# Proxmox CPU Dashboard **v3.0.0** (stable)
 
-Нативное расширение Proxmox VE: сбор максимума данных с железа и управление CPU через **официальный API** (`:8006`, ACL, CSRF). Без отдельного HTTP-сервиса на `:8087`.
+Нативное расширение Proxmox VE: мониторинг железа и управление CPU через **официальный API** (`:8006`, ACL, CSRF). Без отдельного HTTP-сервиса на `:8087`.
 
-## Стек
+**Стабильная ветка:** `master` · **Тег:** `v3.0.0`
 
-| Слой | Технология |
-|------|------------|
-| API | Perl `PVE::API2::Nodes::Nodeinfo` (`register_method`) |
-| Сбор данных | Python 3 `pve-hw-collect.py` (sysfs, lm-sensors, powercap, hwmon, meminfo, lsblk) |
-| Применение настроек | Python 3 `pve-hw-apply.py` + bash `pve-cpufreq-set.sh` / `pve-cpus-set.sh` |
-| UI | ExtJS override `PVE.node.StatusView` → `Proxmox.Utils.API2Request` |
+## UI
 
-## API (нативное, порт 8006)
+| Место | Содержимое |
+|-------|------------|
+| **Node → Summary** | Температуры, частоты CPU, governor / max MHz, пресеты |
+| **Node → Hardware** | Полный инвентарь (таблица), live-обновление 1 с, Apply |
 
-Требуются права PVE: `Sys.Audit` (чтение), `Sys.Modify` (запись).
+## API (порт 8006)
+
+Права PVE: `Sys.Audit` (чтение), `Sys.Modify` (запись).
 
 | Метод | Путь | Описание |
 |-------|------|----------|
-| GET | `/nodes/{node}/hw` | Полный снимок железа (JSON) |
+| GET | `/nodes/{node}/hw` | Полный снимок железа |
+| GET | `/nodes/{node}/hwlive` | Лёгкий снимок для live UI |
 | POST | `/nodes/{node}/hw/cpufreq` | Governor + max_freq (kHz) |
-| POST | `/nodes/{node}/hw/cpus` | Число online logical CPUs |
-| POST | `/nodes/{node}/hw/apply` | Профиль или комбинация параметров |
-| POST | `/nodes/{node}/cpufreq` | Legacy alias → тот же apply |
-| GET | `/nodes/{node}/status` | Поле `thermalstate` = compact JSON от коллектора |
-
-Примеры:
+| POST | `/nodes/{node}/hw/cpus` | Online logical CPUs |
+| POST | `/nodes/{node}/hw/apply` | Профиль или набор параметров |
+| GET | `/nodes/{node}/status` | `thermalstate` = compact JSON |
 
 ```bash
 pvesh get /nodes/$(hostname -s)/hw
+pvesh get /nodes/$(hostname -s)/hwlive
 pvesh create /nodes/$(hostname -s)/hw/apply --profile balanced
-pvesh create /nodes/$(hostname -s)/hw/cpufreq --governor ondemand --max_freq 1700000
 ```
 
-Home Assistant: [ha-proxmox-cpu-ctl](https://github.com/mrkvka/ha-proxmox-cpu-ctl) — перевести на PVE API token (`:8006`), не на `:8087`.
+Home Assistant: [ha-proxmox-cpu-ctl](https://github.com/mrkvka/ha-proxmox-cpu-ctl) — используйте PVE API token (`:8006`).
 
-## Что собирается
-
-- **CPU**: governor, частоты, per-core, topology, online/offline
-- **Sensors**: lm-sensors (`sensors -jA`), нормализованные temp/fan/voltage/power
-- **hwmon**: все `/sys/class/hwmon/*`
-- **RAPL**: powercap zones, package watts
-- **Memory**: `/proc/meminfo`
-- **Disks**: `lsblk -J` (модель, размер, температура если есть)
-- **System**: load, uptime, kernel, `pveversion`
-- **Profiles**: performance, balanced, powersave, emergency, restore
-
-## Установка
+## Установка (stable)
 
 ```bash
 git clone https://github.com/mrkvka/proxmox-cpu-dashboard.git
 cd proxmox-cpu-dashboard
-git checkout cursor/native-hw-v2-aa7b   # или master после merge
+git checkout master   # или: git checkout v3.0.0
 bash install.sh
 ```
 
-В браузере: **Node → Summary → Ctrl+Shift+R**.
+В браузере: **Node → Summary** и **Node → Hardware**, затем **Ctrl+Shift+R**.
+
+## Обновление с v0.5 / :8087
+
+```bash
+cd proxmox-cpu-dashboard && git pull
+bash install.sh
+# при необходимости: systemctl disable --now pve-cpufreq-api 2>/dev/null
+```
 
 ## Удаление
 
@@ -62,17 +57,14 @@ bash install.sh
 bash uninstall.sh
 ```
 
-## Безопасность
-
-- Весь трафик через **pveproxy** (TLS, роли, audit).
-- Нет открытого API на `:8087`.
-- Запись в sysfs только через валидированные скрипты.
-
-## Аудит железа
+## Аудит
 
 ```bash
 /usr/local/bin/pve-hw-collect.py --pretty | less
+bash scripts/audit-hardware.sh
 ```
+
+См. [CHANGELOG.md](CHANGELOG.md).
 
 ## Лицензия
 

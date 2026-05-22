@@ -1,13 +1,13 @@
 #!/bin/bash
-# Proxmox CPU Dashboard v2 — native PVE API (no :8087 sidecar)
+# Proxmox CPU Dashboard v3.0.0 — native PVE API (no :8087 sidecar)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC="$SCRIPT_DIR/src"
-HW_VER="2.5.0"
+HW_VER="3.0.0"
 
 echo "=========================================="
-echo " Proxmox CPU Dashboard v2 — Installer"
+echo " Proxmox CPU Dashboard v3.0.0 — Installer"
 echo "=========================================="
 
 if [ ! -f /usr/share/perl5/PVE/API2/Nodes.pm ]; then
@@ -64,6 +64,6 @@ echo "[*] Restarting pvedaemon + pveproxy..."
 systemctl restart pvedaemon pveproxy
 
 echo ""
-echo " Done. Node menu: Summary, Hardware (2nd), ..."
+echo " Done v3.0.0. Node menu: Summary, Hardware (2nd), ..."
 echo " Ctrl+Shift+R in browser"
 echo ""

@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-VERSION = "2.3.3"
+VERSION = "3.0.0"
 
 
 def read_text(path: str) -> str | None:
