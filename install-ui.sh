@@ -78,10 +78,14 @@ install -m 644 "$BUILD_JS" "$MGR_JS/pve_hw_build_info.js"
 inject_after() {
     local anchor="$1"
     local file="$2"
-    local tag="    <script type=\"text/javascript\" src=\"/pve2/js/${file}?ver=${HW_VER}\"></script>"
-    if ! grep -qF "/pve2/js/${file}" "$INDEX_TPL"; then
-        sed -i "\|${anchor}|a\${tag}" "$INDEX_TPL"
+    if grep -qF "/pve2/js/${file}" "$INDEX_TPL"; then
+        return 0
     fi
+    local line="    <script type=\"text/javascript\" src=\"/pve2/js/${file}?ver=${HW_VER}\"></script>"
+    awk -v anchor="$anchor" -v line="$line" '
+        { print }
+        index($0, anchor) { print line }
+    ' "$INDEX_TPL" > "${INDEX_TPL}.new" && mv "${INDEX_TPL}.new" "$INDEX_TPL"
 }
 
 inject_after "pve2/js/pvemanagerlib.js" pve_hw_core.js

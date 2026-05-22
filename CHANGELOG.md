@@ -1,5 +1,11 @@
 # Changelog
 
+## [3.5.1] — 2026-05-23
+
+### Fix
+
+- `install-ui.sh`: script tags were not injected (`\${tag}` never expanded); use awk append
+
 ## [3.5.0] — 2026-05-22
 
 ### P2: UI plugin polish
