@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC="$SCRIPT_DIR/src"
-HW_VER="2.4.0"
+HW_VER="2.4.1"
 
 echo "=========================================="
 echo " Proxmox CPU Dashboard v2 — Installer"

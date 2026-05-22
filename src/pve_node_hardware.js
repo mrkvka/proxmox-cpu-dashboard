@@ -161,6 +161,32 @@ Ext.define('PVE.node.HardwareView', {
 Ext.define('PVE.node.Config', {
     override: 'PVE.node.Config',
 
+    repositionHardwareTab: function() {
+        var me = this;
+        var root = me.store && me.store.getRoot && me.store.getRoot();
+        if (!root) {
+            return;
+        }
+        var hwNode = root.findChild('id', 'pvehardware', true);
+        var summaryNode = root.findChild('id', 'summary', true);
+        if (!hwNode || !summaryNode) {
+            return;
+        }
+        var parent = summaryNode.parentNode;
+        if (!parent) {
+            return;
+        }
+        var insertIdx = parent.indexOf(summaryNode) + 1;
+        if (parent.indexOf(hwNode) === insertIdx) {
+            return;
+        }
+        var hwParent = hwNode.parentNode;
+        if (hwParent) {
+            hwParent.removeChild(hwNode, false);
+        }
+        parent.insertChild(insertIdx, hwNode);
+    },
+
     initComponent: function() {
         var me = this;
         me.callParent(arguments);
@@ -168,14 +194,14 @@ Ext.define('PVE.node.Config', {
         if (!caps.nodes || !caps.nodes['Sys.Audit']) {
             return;
         }
-        if (me.savedItems && me.savedItems.pvehardware) {
-            return;
+        if (!me.savedItems || !me.savedItems.pvehardware) {
+            me.insertNodes([{
+                xtype: 'pveNodeHardware',
+                title: gettext('Hardware'),
+                iconCls: 'fa fa-microchip',
+                itemId: 'pvehardware',
+            }]);
         }
-        me.insertNodes([{
-            xtype: 'pveNodeHardware',
-            title: gettext('Hardware'),
-            iconCls: 'fa fa-microchip',
-            itemId: 'pvehardware',
-        }]);
+        me.repositionHardwareTab();
     },
 });
