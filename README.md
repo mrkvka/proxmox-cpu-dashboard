@@ -1,71 +1,87 @@
-# Proxmox CPU Dashboard **v3.0.0** (stable)
+# Proxmox CPU Dashboard **v3.1.0**
 
-Нативное расширение Proxmox VE: мониторинг железа и управление CPU через **официальный API** (`:8006`, ACL, CSRF). Без отдельного HTTP-сервиса на `:8087`.
+Native hardware monitoring and CPU control for **Proxmox VE 9.x** via the official API (`:8006`, roles, CSRF). No sidecar on `:8087`.
 
-**Стабильная ветка:** `master` · **Тег:** `v3.0.0`
+**Stable tag:** [`v3.1.0`](https://github.com/mrkvka/proxmox-cpu-dashboard/releases) · **Branch:** `master`
+
+## Compatibility
+
+| Component | Supported | Notes |
+|-----------|-----------|--------|
+| Proxmox VE | **9.0 – 9.x** | Tested on 9.2.x; run `install.sh` again after `pve-manager` upgrades |
+| CPU | Intel / AMD | cpufreq via sysfs; `schedutil` / `acpi-cpufreq` |
+| Sensors | `lm-sensors` | Installed by `install.sh` if missing |
+| Disks | `smartctl` optional | Without it: no SMART temp / lifetime GiB |
+| Browsers | HTTPS UI on :8006 | Same-origin API (no mixed content) |
+| PVE 8.x | Not supported | `Nodes.pm` layout differs |
+| Home Assistant | Separate repo | [ha-proxmox-cpu-ctl](https://github.com/mrkvka/ha-proxmox-cpu-ctl) — use API token on :8006 |
 
 ## UI
 
-| Место | Содержимое |
-|-------|------------|
-| **Node → Summary** | Температуры, частоты CPU, governor / max MHz, пресеты |
-| **Node → Hardware** | Полный инвентарь (таблица), live-обновление 1 с, Apply |
+| Location | Content |
+|----------|---------|
+| **Node → Summary** | Stock page (thermals from PVE as before) |
+| **Node → Hardware** | Inventory table, live 1 s refresh, governor / MHz / CPUs, presets |
 
-## API (порт 8006)
+## API
 
-Права PVE: `Sys.Audit` (чтение), `Sys.Modify` (запись).
+Permissions: `Sys.Audit` (read), `Sys.Modify` (write). Implementation: `/usr/share/perl5/PVE/API2/Nodes/Hardware.pm`.
 
-| Метод | Путь | Описание |
-|-------|------|----------|
-| GET | `/nodes/{node}/hw` | Полный снимок железа |
-| GET | `/nodes/{node}/hwlive` | Лёгкий снимок для live UI |
-| POST | `/nodes/{node}/hw/cpufreq` | Governor + max_freq (kHz) |
-| POST | `/nodes/{node}/hw/cpus` | Online logical CPUs |
-| POST | `/nodes/{node}/hw/apply` | Профиль или набор параметров |
-| GET | `/nodes/{node}/status` | `thermalstate` = compact JSON |
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/nodes/{node}/hw` | Full hardware JSON |
+| GET | `/nodes/{node}/hwlive` | Live poll snapshot |
+| POST | `/nodes/{node}/hwapply` | Profile or combined settings |
+| POST | `/nodes/{node}/hwcpufreq` | Governor + max_freq (kHz) |
+| POST | `/nodes/{node}/hwcpus` | Online logical CPUs |
 
-```bash
-pvesh get /nodes/$(hostname -s)/hw
-pvesh get /nodes/$(hostname -s)/hwlive
-pvesh create /nodes/$(hostname -s)/hw/apply --profile balanced
-```
+See [SECURITY.md](SECURITY.md).
 
-Home Assistant: [ha-proxmox-cpu-ctl](https://github.com/mrkvka/ha-proxmox-cpu-ctl) — используйте PVE API token (`:8006`).
-
-## Установка (stable)
+## Install
 
 ```bash
 git clone https://github.com/mrkvka/proxmox-cpu-dashboard.git
 cd proxmox-cpu-dashboard
-git checkout master   # или: git checkout v3.0.0
+git checkout v3.1.0   # or master
 bash install.sh
+bash scripts/verify-patch.sh
 ```
 
-В браузере: **Node → Summary** и **Node → Hardware**, затем **Ctrl+Shift+R**.
+Browser: **Node → Hardware**, then **Ctrl+Shift+R**.
 
-## Обновление с v0.5 / :8087
+After every **`apt upgrade pve-manager`**:
 
 ```bash
-cd proxmox-cpu-dashboard && git pull
-bash install.sh
-# при необходимости: systemctl disable --now pve-cpufreq-api 2>/dev/null
+cd proxmox-cpu-dashboard && git pull && bash install.sh
 ```
 
-## Удаление
+## Uninstall
 
 ```bash
 bash uninstall.sh
 ```
 
-## Аудит
+Keeps `*.bak_*` backups; restores `Nodes.pm` and `index.html.tpl` when backups exist.
+
+## Architecture
+
+```
+Browser (:8006) → pveproxy → Nodes.pm (hook) → Hardware.pm → pve-hw-collect.py / pve-hw-apply.py
+```
+
+Port **8006** is the normal Proxmox web/API port (not installed by this project).
+
+## Audit
 
 ```bash
 /usr/local/bin/pve-hw-collect.py --pretty | less
 bash scripts/audit-hardware.sh
 ```
 
-См. [CHANGELOG.md](CHANGELOG.md).
+## Changelog
 
-## Лицензия
+[CHANGELOG.md](CHANGELOG.md)
+
+## License
 
 MIT

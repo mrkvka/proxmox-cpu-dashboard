@@ -86,21 +86,7 @@ Ext.define('PVE.node.HardwareView', {
                             text: Ext.String.capitalize(name),
                             handler: function() {
                                 var panel = this.up('pveNodeHardware');
-                                var node = panel.pveSelNode.data.node;
-                                Proxmox.Utils.API2Request({
-                                    url: '/nodes/' + encodeURIComponent(node) + '/hwapply',
-                                    method: 'POST',
-                                    params: { node: node, profile: name },
-                                    success: function() {
-                                        PVECPUDash.fetchFull(panel, function(data) {
-                                            PVECPUDash.repaintInventory(panel, data, true);
-                                            PVECPUDash.syncControls(panel, data);
-                                        });
-                                    },
-                                    failure: function(r) {
-                                        Ext.Msg.alert(gettext('Error'), r.htmlStatus || gettext('Failed'));
-                                    }
-                                });
+                                PVECPUDash.applyProfile(panel, name);
                             }
                         };
                     })

@@ -379,7 +379,37 @@ var PVECPUDash = (function() {
         });
     }
 
-    function applySettings(panel, settings) {
+    function needsCpuSafetyConfirm(panel, settings, profile) {
+        if (profile === 'emergency') {
+            return true;
+        }
+        var cpu = cpuOf(panel._pveHwData || {});
+        if (!cpu.total || !settings.online_cpus) {
+            return false;
+        }
+        return settings.online_cpus < cpu.online;
+    }
+
+    function confirmDangerousAction(callback) {
+        Ext.Msg.confirm(
+            gettext('Warning'),
+            gettext('Reducing online CPUs or applying the Emergency profile can disrupt running VMs and workloads. Continue?'),
+            function(btn) {
+                if (btn === 'yes') {
+                    callback();
+                }
+            }
+        );
+    }
+
+    function applySettings(panel, settings, options) {
+        options = options || {};
+        if (!options.confirmed && needsCpuSafetyConfirm(panel, settings, options.profile)) {
+            confirmDangerousAction(function() {
+                applySettings(panel, settings, { confirmed: true, profile: options.profile });
+            });
+            return;
+        }
         var node = panel.pveSelNode.data.node;
         var base = '/nodes/' + encodeURIComponent(node);
         var done = function() {
@@ -432,6 +462,33 @@ var PVECPUDash = (function() {
         }
     }
 
+    function applyProfile(panel, profileName) {
+        var node = panel.pveSelNode.data.node;
+        var run = function() {
+            Proxmox.Utils.API2Request({
+                url: '/nodes/' + encodeURIComponent(node) + '/hwapply',
+                method: 'POST',
+                params: { node: node, profile: profileName },
+                success: function() {
+                    Ext.Msg.alert(gettext('Success'), gettext('Profile applied'));
+                    fetchFull(panel, function(data) {
+                        repaintInventory(panel, data, true);
+                        syncControls(panel, data);
+                        startLivePoll(panel);
+                    });
+                },
+                failure: function(r) {
+                    Ext.Msg.alert(gettext('Error'), r.htmlStatus || gettext('Failed'));
+                }
+            });
+        };
+        if (profileName === 'emergency') {
+            confirmDangerousAction(run);
+        } else {
+            run();
+        }
+    }
+
     return {
         ensureStyle: ensureStyle,
         parseState: parseState,
@@ -445,6 +502,8 @@ var PVECPUDash = (function() {
         freqOf: freqOf,
         cpuOf: cpuOf,
         applySettings: applySettings,
+        applyProfile: applyProfile,
+        confirmDangerousAction: confirmDangerousAction,
         repaintInventory: repaintInventory,
         updateInventoryCells: updateInventoryCells,
         setInventoryHtml: setInventoryHtml,
