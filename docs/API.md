@@ -109,3 +109,16 @@ After `apt upgrade pve-manager`, re-run `bash install.sh` on the node.
 ## API-only install
 
 `bash install.sh --api-only` — no changes to Proxmox web UI files.
+
+
+### Power (`power`)
+
+| Field | Description |
+|-------|-------------|
+| `system_watts` | Display power (W): measured RAPL/sensors, hybrid, or estimated total |
+| `package_watts` | CPU package from RAPL when available |
+| `method` | `measured`, `hybrid`, or `estimated` |
+| `confidence` | `low`, `medium` |
+| `estimate` | Heuristic breakdown: `cpu_tdp_w`, `memory_w`, `storage_w`, `platform_w`, `load_total_w`, `idle_total_w` |
+| `rapl_breakdown` | Per-zone RAPL readings |
+

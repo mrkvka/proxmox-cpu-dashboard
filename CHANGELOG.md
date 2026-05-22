@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.4.2] — 2026-05-22
+
+### System power estimate
+
+- `power.system_watts` — whole-node estimate (measured RAPL/sensors, hybrid, or heuristic)
+- `power.method` / `power.confidence`, `power.estimate` breakdown (CPU TDP, memory, storage, platform)
+- Inventory **Power** section shows system total plus component estimates
+
 ## [3.4.0] — 2026-05-22
 
 ### Split packages for distribution
