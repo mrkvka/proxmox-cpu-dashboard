@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC="$SCRIPT_DIR/src"
-HW_VER="2.4.1"
+HW_VER="2.4.2"
 
 echo "=========================================="
 echo " Proxmox CPU Dashboard v2 — Installer"
@@ -53,13 +53,21 @@ cp "$SRC/pve_node_summary.js" /usr/share/pve-manager/js/pve_node_summary.js
 cp "$SRC/pve_node_hardware.js" /usr/share/pve-manager/js/pve_node_hardware.js
 
 INDEX_TPL="/usr/share/pve-manager/index.html.tpl"
-for js in pve_node_summary.js pve_node_hardware.js; do
-    if ! grep -q "$js" "$INDEX_TPL"; then
-        sed -i "/pvemanagerlib.js/a\\    <script type=\"text/javascript\" src=\"/pve2/js/${js}?ver=${HW_VER}\"></script>" "$INDEX_TPL"
-        echo "    Linked $js in index.html.tpl"
+link_hw_js() {
+    local js="$1"
+    local tag="    <script type=\"text/javascript\" src=\"/pve2/js/${js}?ver=${HW_VER}\"></script>"
+    if grep -q "/pve2/js/${js}" "$INDEX_TPL"; then
+        sed -i "s|/pve2/js/${js}?ver=[^\"']*|/pve2/js/${js}?ver=${HW_VER}|g" "$INDEX_TPL"
+        echo "    Updated $js in index.html.tpl"
     else
-        sed -i "s|/pve2/js/${js}?ver=[^\"]*\"|/pve2/js/${js}?ver=${HW_VER}\"|g" "$INDEX_TPL" || true
+        sed -i "\|pve2/js/pvemanagerlib.js|a\\${tag}" "$INDEX_TPL"
+        echo "    Linked $js in index.html.tpl"
     fi
+}
+link_hw_js pve_node_summary.js
+link_hw_js pve_node_hardware.js
+for js in pve_node_summary.js pve_node_hardware.js; do
+    grep -q "/pve2/js/${js}" "$INDEX_TPL" || { echo "ERROR: ${js} not in index.html.tpl"; exit 1; }
 done
 
 echo "[*] Restarting pvedaemon + pveproxy (required for new API routes)..."
@@ -69,6 +77,6 @@ echo ""
 echo "=========================================="
 echo " Installation complete (native API v2)"
 echo "=========================================="
-echo "  UI: Node -> Hardware tab (Ctrl+Shift+R)"
-echo "  Summary page is unchanged (no large table)"
+echo "  UI: Node -> Hardware tab (2nd, under Summary)"
+echo "  Hard refresh: Ctrl+Shift+R"
 echo ""
