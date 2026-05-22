@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-VERSION = "2.3.0"
+VERSION = "2.3.1"
 
 
 def read_text(path: str) -> str | None:
@@ -373,6 +373,8 @@ def collect_storage() -> list[dict[str, Any]]:
         temp = nvme.get("temperature")
         wear = nvme.get("percent_used")
         hours = nvme.get("power_on_hours")
+        data_read_u = nvme.get("data_units_read")
+        data_written_u = nvme.get("data_units_written")
         if temp is None:
             for item in (smart.get("ata_smart_attributes") or {}).get("table") or []:
                 label = (item.get("name") or "").lower()
@@ -394,6 +396,8 @@ def collect_storage() -> list[dict[str, Any]]:
             "temperature_c": temp,
             "wear_percent": wear,
             "power_on_hours": hours,
+            "data_read_gib": _nvme_units_to_gib(data_read_u),
+            "data_written_gib": _nvme_units_to_gib(data_written_u),
             "scheduler": read_text(os.path.join(queue, "scheduler")) if os.path.isdir(queue) else "",
             "read_ahead_kb": read_int(os.path.join(queue, "read_ahead_kb")),
             "max_sectors_kb": read_int(os.path.join(queue, "max_sectors_kb")),
@@ -503,6 +507,58 @@ def collect_network() -> list[dict[str, Any]]:
     return interfaces
 
 
+
+def _nvme_units_to_gib(units: Any) -> float | None:
+    if units is None:
+        return None
+    try:
+        return int(units) * 512000 / (1024 ** 3)
+    except (TypeError, ValueError):
+        return None
+
+
+def _fmt_gib(gib: float | None) -> str:
+    if gib is None:
+        return "—"
+    if gib >= 1024:
+        return f"{gib / 1024:.2f} TiB"
+    return f"{gib:.1f} GiB"
+
+
+def _fmt_size_gib(value: Any) -> str:
+    if value is None or value == "":
+        return "—"
+    text = str(value).strip()
+    m = re.match(r"^([\d.]+)\s*([KMGT])i?B?$", text, re.I)
+    if m:
+        num = float(m.group(1))
+        unit = m.group(2).upper()
+        mult = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
+        return _fmt_gib(num * mult[unit] / (1024**3))
+    try:
+        return _fmt_gib(int(text) / (1024**3))
+    except ValueError:
+        return text
+
+
+def _fmt_mib_to_gib(mib: Any) -> str:
+    if mib is None or mib == "" or mib == "?":
+        return "—"
+    try:
+        return _fmt_gib(float(mib) / 1024)
+    except (TypeError, ValueError):
+        return str(mib)
+
+
+def _fmt_power_on_hours(hours: Any) -> str:
+    if hours is None:
+        return "—"
+    try:
+        h = int(hours)
+        return f"{h} h ({round(h / 24 / 365.25, 1)} yr)"
+    except (TypeError, ValueError):
+        return str(hours)
+
 def _fmt_cell(value: Any) -> str:
     if value is None or value == "" or value == []:
         return "—"
@@ -594,13 +650,24 @@ def build_inventory(data: dict[str, Any]) -> list[dict[str, Any]]:
                 _row("Model", disk.get("model"), disk.get("model"), "smart"),
                 _row("Serial", disk.get("serial"), disk.get("serial"), "smart"),
                 _row("Bus / type", disk.get("transport"), "rotational" if disk.get("rotational") == "1" else "SSD/NVMe", "lsblk"),
-                _row("Capacity", disk.get("size_bytes"), disk.get("size_bytes"), "lsblk"),
+                _row("Capacity", _fmt_size_gib(disk.get("size_bytes")), _fmt_size_gib(disk.get("size_bytes")), "lsblk"),
                 _row("Temperature", "SMART / NVMe health", f"{disk.get('temperature_c')} °C" if disk.get("temperature_c") is not None else None, "smart"),
                 _row("Wear", "100 % (new)", f"{disk.get('wear_percent')} %" if disk.get("wear_percent") is not None else None, "smart"),
-                _row("Power-on hours", "lifetime counter", disk.get("power_on_hours"), "smart"),
+                _row(
+                    "Written (lifetime)",
+                    "SMART total",
+                    _fmt_gib(disk.get("data_written_gib")) if disk.get("data_written_gib") is not None else _fmt_power_on_hours(disk.get("power_on_hours")),
+                    "smart",
+                ),
+                _row(
+                    "Read (lifetime)",
+                    "SMART total",
+                    _fmt_gib(disk.get("data_read_gib")) if disk.get("data_read_gib") is not None else None,
+                    "smart",
+                ),
                 _row("IO scheduler", sched_avail, sched_applied, "sysfs"),
-                _row("Total read", "since boot", f"{ds.get('read_mib', '?')} MiB", "diskstats"),
-                _row("Total written", "since boot", f"{ds.get('write_mib', '?')} MiB", "diskstats"),
+                _row("Total read", "since boot", _fmt_mib_to_gib(ds.get("read_mib")), "diskstats"),
+                _row("Total written", "since boot", _fmt_mib_to_gib(ds.get("write_mib")), "diskstats"),
             ],
         })
 
