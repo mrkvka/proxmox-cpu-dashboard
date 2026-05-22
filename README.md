@@ -1,56 +1,62 @@
 # Proxmox Node Hardware API
 
-Hardware inventory and CPU control for **Proxmox VE 9.x** through the **native PVE API** (`:8006`).
+Hardware inventory and CPU control for **Proxmox VE 9.x** via the native PVE API (`:8006`).
 
-Optional **Node → Hardware** tab in the web UI. External tools (monitoring, automation) use the same JSON API.
+**Version:** see [`VERSION`](VERSION) · **Docs:** [docs/API.md](docs/API.md) · **Upgrade:** [UPGRADE.md](UPGRADE.md)
 
-**Docs:** [docs/API.md](docs/API.md) · **Tag:** [`v3.2.0`](https://github.com/mrkvka/proxmox-cpu-dashboard/releases)
+## Install
+
+**From git (on the Proxmox host):**
+
+```bash
+git clone https://github.com/mrkvka/proxmox-cpu-dashboard.git
+cd proxmox-cpu-dashboard
+bash install.sh              # API + Hardware tab UI
+# bash install.sh --api-only   # API only, no ExtJS changes
+bash scripts/verify-patch.sh
+```
+
+**From .deb:**
+
+```bash
+make deb
+dpkg -i dist/proxmox-node-hw-api_*_all.deb
+```
+
+**API check:**
+
+```bash
+pvesh get /nodes/$(hostname -s)/hw
+```
+
+Optional UI: **Node → Hardware** → Ctrl+Shift+R.
+
+## Product layout
+
+| Path | Role |
+|------|------|
+| `/usr/share/pve-node-hw-api/` | Package files, docs, `VERSION` |
+| `/usr/share/perl5/PVE/API2/Nodes/Hardware.pm` | API registration |
+| `/usr/local/bin/pve-hw-collect.py` | Data collector |
+| `/nodes/{node}/hw*` | HTTP API (see [docs/API.md](docs/API.md)) |
 
 ## Compatibility
 
 | Component | Supported |
 |-----------|-----------|
-| Proxmox VE | 9.0 – 9.x (re-run `install.sh` after `pve-manager` upgrades) |
-| CPU | Intel / AMD (sysfs cpufreq) |
-| Sensors | `lm-sensors` (installed if missing) |
-| Disks | `smartctl` optional (SMART / lifetime GiB) |
-| PVE 8.x | Not supported |
+| Proxmox VE | 9.0 – 9.x |
+| CPU | Intel / AMD |
+| Sensors | `lm-sensors` |
+| Disks | `smartctl` (recommended) |
 
-## Quick start
-
-```bash
-git clone https://github.com/mrkvka/proxmox-cpu-dashboard.git
-cd proxmox-cpu-dashboard
-bash install.sh
-bash scripts/verify-patch.sh
-```
+## Development
 
 ```bash
-pvesh get /nodes/$(hostname -s)/hw
-pvesh get /nodes/$(hostname -s)/hwlive
+make test
+make shellcheck
 ```
 
-Web UI: **Node → Hardware** → **Ctrl+Shift+R**.
-
-## API summary
-
-| Method | Path |
-|--------|------|
-| GET | `/nodes/{node}/hw` |
-| GET | `/nodes/{node}/hwlive` |
-| POST | `/nodes/{node}/hwapply` |
-| POST | `/nodes/{node}/hwcpufreq` |
-| POST | `/nodes/{node}/hwcpus` |
-
-Details, auth, and examples: **[docs/API.md](docs/API.md)**.
-
-## Architecture
-
-```
-Client (:8006) → pveproxy → Nodes.pm → Hardware.pm → collect.py / apply.py
-```
-
-Port **8006** is standard Proxmox — this project registers API routes and optional UI scripts.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Uninstall
 
@@ -60,11 +66,7 @@ bash uninstall.sh
 
 ## Security
 
-[SECURITY.md](SECURITY.md)
-
-## Changelog
-
-[CHANGELOG.md](CHANGELOG.md)
+[SECURITY.md](SECURITY.md) · [CHANGELOG.md](CHANGELOG.md)
 
 ## License
 

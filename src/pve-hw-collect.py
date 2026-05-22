@@ -21,7 +21,20 @@ import time
 from pathlib import Path
 from typing import Any
 
-VERSION = "3.2.0"
+_VERSION_FILES = (
+    Path("/usr/share/pve-node-hw-api/VERSION"),
+    Path(__file__).resolve().parent.parent / "VERSION",
+)
+
+
+def package_version() -> str:
+    for path in _VERSION_FILES:
+        if path.is_file():
+            return path.read_text(encoding="utf-8").strip()
+    return "0.0.0"
+
+
+VERSION = package_version()
 
 
 def read_text(path: str) -> str | None:
@@ -832,7 +845,7 @@ def collect_live() -> dict[str, Any]:
             pass
     payload = {
         "meta": {
-            "name": "Proxmox CPU Dashboard",
+            "name": "Proxmox Node Hardware API",
             "version": VERSION,
             "collected_at": int(time.time()),
             "mode": "live",
@@ -850,6 +863,7 @@ def collect_live() -> dict[str, Any]:
         "memory_modules": static.get("memory_modules") or collect_memory_modules(),
         "capabilities": collect_capabilities(cpu),
         "profiles": profile_catalog(cpu),
+        "warnings": collect_warnings(cpu),
     }
     payload["inventory"] = build_inventory(payload)
     return payload
@@ -935,6 +949,20 @@ def run_command_text(cmd: list[str]) -> str | None:
     return None
 
 
+
+
+def collect_warnings(cpu: dict[str, Any] | None = None) -> list[str]:
+    warnings: list[str] = []
+    if not shutil.which("sensors"):
+        warnings.append("lm-sensors not installed; temperature data limited")
+    if not shutil.which("smartctl"):
+        warnings.append("smartctl not installed; disk SMART metrics unavailable")
+    cpu = cpu or {}
+    freq = cpu.get("frequency") or {}
+    if not freq.get("available_governors"):
+        warnings.append("cpufreq governors not exposed in sysfs")
+    return warnings
+
 def collect_capabilities(cpu: dict[str, Any]) -> dict[str, Any]:
     freq = cpu.get("frequency") or {}
     return {
@@ -988,7 +1016,7 @@ def collect_full() -> dict[str, Any]:
     sensors = collect_sensors()
     payload = {
         "meta": {
-            "name": "Proxmox CPU Dashboard",
+            "name": "Proxmox Node Hardware API",
             "version": VERSION,
             "collected_at": int(time.time()),
         },
@@ -1007,6 +1035,7 @@ def collect_full() -> dict[str, Any]:
         "lscpu": collect_lscpu(),
         "capabilities": collect_capabilities(cpu),
         "profiles": profile_catalog(cpu),
+        "warnings": collect_warnings(cpu),
     }
     payload["inventory"] = build_inventory(payload)
     save_static_cache(payload)

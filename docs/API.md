@@ -36,7 +36,8 @@ pvesh get /nodes/$NODE/hw
 
 Response includes:
 
-- `meta.version` — collector version
+- `meta.version` — package version
+- `warnings` — optional list (e.g. missing smartctl)
 - `cpu`, `sensors`, `memory`, `storage`, `inventory`, `profiles`, `capabilities`
 
 ### `GET /hwlive`
@@ -104,3 +105,7 @@ For debugging on the host:
 ## Upgrade
 
 After `apt upgrade pve-manager`, re-run `bash install.sh` on the node.
+
+## API-only install
+
+`bash install.sh --api-only` — no changes to Proxmox web UI files.

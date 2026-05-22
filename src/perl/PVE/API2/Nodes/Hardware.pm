@@ -4,6 +4,16 @@ use strict;
 use warnings;
 
 use JSON qw(decode_json);
+
+our $API_VERSION = "0.0.0";
+for my $vf ("/usr/share/pve-node-hw-api/VERSION") {
+    if (-r $vf) {
+        open(my $fh, "<", $vf) or next;
+        chomp($API_VERSION = <$fh>);
+        close($fh);
+        last;
+    }
+}
 use PVE::JSONSchema qw(get_standard_option);
 
 sub pve_hw_collect_json {

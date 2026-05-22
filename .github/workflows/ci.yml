@@ -12,12 +12,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Python syntax and unit tests
+      - name: Version file present
+        run: test -f VERSION && grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' VERSION
+
+      - name: Python tests
         run: |
           python3 -m py_compile src/pve-hw-collect.py src/pve-hw-apply.py
           python3 -m unittest discover -s tests -p 'test_*.py' -v
 
-      - name: Perl module syntax
+      - name: Perl syntax
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y libjson-perl
@@ -27,3 +30,9 @@ jobs:
         run: |
           sudo apt-get install -y shellcheck
           shellcheck install.sh uninstall.sh scripts/*.sh src/patch-nodes.sh
+
+      - name: Build .deb (dry)
+        run: |
+          sudo apt-get install -y dpkg-dev
+          bash scripts/build-deb.sh
+          test -f dist/proxmox-node-hw-api_*.deb
