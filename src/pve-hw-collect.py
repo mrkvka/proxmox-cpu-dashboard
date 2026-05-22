@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-VERSION = "2.3.2"
+VERSION = "2.3.3"
 
 
 def read_text(path: str) -> str | None:
@@ -669,15 +669,21 @@ def build_inventory(data: dict[str, Any]) -> list[dict[str, Any]]:
                 _row("Temperature", "SMART / NVMe health", f"{disk.get('temperature_c')} °C" if disk.get("temperature_c") is not None else None, "smart"),
                 _row("Wear", "100 % (new)", f"{disk.get('wear_percent')} %" if disk.get("wear_percent") is not None else None, "smart"),
                 _row(
+                    "Power-on hours",
+                    "hours (SMART)",
+                    _fmt_power_on_hours(disk.get("power_on_hours")),
+                    "smart",
+                ),
+                _row(
                     "Written (lifetime)",
                     "SMART total",
-                    _fmt_gib(disk.get("data_written_gib")) if disk.get("data_written_gib") is not None else _fmt_power_on_hours(disk.get("power_on_hours")),
+                    _fmt_gib(disk.get("data_written_gib")),
                     "smart",
                 ),
                 _row(
                     "Read (lifetime)",
                     "SMART total",
-                    _fmt_gib(disk.get("data_read_gib")) if disk.get("data_read_gib") is not None else None,
+                    _fmt_gib(disk.get("data_read_gib")),
                     "smart",
                 ),
                 _row("IO scheduler", sched_avail, sched_applied, "sysfs"),
