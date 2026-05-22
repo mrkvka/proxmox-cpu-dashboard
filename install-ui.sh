@@ -34,6 +34,9 @@ if [[ -f "$API_SHARE/VERSION" ]]; then
     fi
 fi
 
+
+bash "$SCRIPT_DIR/scripts/gen-build-info.sh"
+BUILD_JS="$SRC/pve_hw_build_info.js"
 echo "=========================================="
 echo " proxmox-node-hw-ui v${HW_VER}"
 echo "=========================================="
@@ -46,20 +49,25 @@ install -d "$SHARE_UI"
 install -m 644 "$SCRIPT_DIR/VERSION" "$SHARE_UI/VERSION"
 install -m 644 "$SRC/pve_node_summary.js" "$SHARE_UI/pve_node_summary.js"
 install -m 644 "$SRC/pve_node_hardware.js" "$SHARE_UI/pve_node_hardware.js"
+install -m 644 "$BUILD_JS" "$SHARE_UI/pve_hw_build_info.js"
 install -m 755 "$SCRIPT_DIR/install-ui.sh" "$SHARE_UI/install-ui.sh"
 install -m 755 "$SCRIPT_DIR/uninstall-ui.sh" "$SHARE_UI/uninstall-ui.sh"
 
 cp "$SRC/pve_node_summary.js" /usr/share/pve-manager/js/pve_node_summary.js
 cp "$SRC/pve_node_hardware.js" /usr/share/pve-manager/js/pve_node_hardware.js
+cp "$BUILD_JS" /usr/share/pve-manager/js/pve_hw_build_info.js
 
 INDEX_TPL="/usr/share/pve-manager/index.html.tpl"
 sed -i '\|/pve2/js/pve_node_summary.js|d' "$INDEX_TPL"
 sed -i '\|/pve2/js/pve_node_hardware.js|d' "$INDEX_TPL"
+sed -i '\|/pve2/js/pve_hw_build_info.js|d' "$INDEX_TPL"
 SUM_TAG="    <script type=\"text/javascript\" src=\"/pve2/js/pve_node_summary.js?ver=${HW_VER}\"></script>"
 HW_TAG="    <script type=\"text/javascript\" src=\"/pve2/js/pve_node_hardware.js?ver=${HW_VER}\"></script>"
+ABOUT_TAG="    <script type=\"text/javascript\" src=\"/pve2/js/pve_hw_build_info.js?ver=${HW_VER}\"></script>"
 sed -i "\|pve2/js/pvemanagerlib.js|a\\${SUM_TAG}" "$INDEX_TPL"
 sed -i "\|pve2/js/pve_node_summary.js|a\\${HW_TAG}" "$INDEX_TPL"
-grep -q pve_node_summary.js "$INDEX_TPL" && grep -q pve_node_hardware.js "$INDEX_TPL"
+sed -i "\|pve2/js/pve_node_hardware.js|a\\${ABOUT_TAG}" "$INDEX_TPL"
+grep -q pve_hw_build_info.js "$INDEX_TPL" && grep -q pve_node_summary.js "$INDEX_TPL" && grep -q pve_node_hardware.js "$INDEX_TPL"
 
 echo "[*] Restarting pveproxy..."
 systemctl restart pveproxy

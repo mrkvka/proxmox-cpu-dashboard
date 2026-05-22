@@ -24,7 +24,7 @@ var PVECPUDash = (function() {
             '@keyframes pve-hw-flash-changed{0%{background-color:rgba(47,128,237,.45)}100%{background-color:transparent}}',
             '.pve-hw-table td.pve-hw-flash-up{animation:pve-hw-flash-up 1.4s ease-out}',
             '.pve-hw-table td.pve-hw-flash-down{animation:pve-hw-flash-down 1.4s ease-out}',
-            '.pve-hw-table td.pve-hw-flash-changed{animation:pve-hw-flash-changed 1.4s ease-out}'
+            '.pve-hw-table td.pve-hw-flash-changed{animation:pve-hw-flash-changed 1.4s ease-out}','.pve-hw-about{font-size:10px;line-height:1.55;opacity:.85;padding:8px 12px 10px;border-top:1px solid rgba(128,128,128,.35)}','.pve-hw-about a{color:inherit;text-decoration:underline}','.pve-hw-about code{font-size:9px;opacity:.9}'
         ].join('');
         if (existing) {
             existing.textContent = css;
@@ -361,6 +361,7 @@ var PVECPUDash = (function() {
         setInventoryHtml(panel, renderAllInventory(data));
         clearPrev(panel);
         panel._pveHwTableReady = !!(sections && sections.length);
+        updateAbout(panel, data);
     }
 
     function fetchFull(panel, cb) {
@@ -462,6 +463,63 @@ var PVECPUDash = (function() {
         }
     }
 
+
+    function aboutHost(panel) {
+        return panel.down('#pveHwAbout');
+    }
+
+    function renderAboutHtml(data) {
+        var bi = (window.PVECPUDash && PVECPUDash.BUILD_INFO) || {};
+        var meta = (data && data.meta) || {};
+        var mode = meta.mode || 'full';
+        var lines = [];
+        lines.push('<div class="pve-hw-about">');
+        lines.push('<strong>Proxmox Node Hardware</strong><br>');
+        if (bi.repository) {
+            lines.push('GitHub: <a href="' + esc(bi.repository) + '" target="_blank" rel="noopener noreferrer">' +
+                esc(bi.repository.replace('https://github.com/', '')) + '</a>');
+            if (bi.releases) {
+                lines.push(' · <a href="' + esc(bi.releases) + '" target="_blank" rel="noopener noreferrer">releases</a>');
+            }
+            lines.push('<br>');
+        }
+        lines.push('UI <code>' + esc(bi.uiVersion || '?') + '</code>');
+        lines.push(' · API collector <code>' + esc(meta.version || '?') + '</code>');
+        if (bi.commit) {
+            lines.push(' · commit <code>' + esc(bi.commit) + '</code>');
+        }
+        if (bi.branch) {
+            lines.push(' · ' + esc(bi.branch));
+        }
+        if (bi.installedAt) {
+            lines.push('<br>Installed ' + esc(bi.installedAt));
+        }
+        if (meta.collected_at) {
+            try {
+                lines.push(' · data ' + esc(new Date(meta.collected_at * 1000).toLocaleString()));
+            } catch (e) {
+                lines.push(' · data ts ' + esc(meta.collected_at));
+            }
+        }
+        lines.push(' · mode ' + esc(mode));
+        if (data && data.warnings && data.warnings.length) {
+            lines.push('<br><span style="color:#d97706">' + esc(data.warnings.join(' · ')) + '</span>');
+        }
+        lines.push('</div>');
+        return lines.join('');
+    }
+
+    function updateAbout(panel, data) {
+        var host = aboutHost(panel);
+        if (!host) return;
+        var html = renderAboutHtml(data || panel._pveHwData || {});
+        if (host._pveHwAboutHtml !== html) {
+            host.update(html);
+            host._pveHwAboutHtml = html;
+        }
+    }
+
+
     function applyProfile(panel, profileName) {
         var node = panel.pveSelNode.data.node;
         var run = function() {
@@ -509,6 +567,8 @@ var PVECPUDash = (function() {
         setInventoryHtml: setInventoryHtml,
         inventoryWrap: inventoryWrap,
         saveScroll: saveScroll,
-        restoreScroll: restoreScroll
+        restoreScroll: restoreScroll,
+        updateAbout: updateAbout,
+        renderAboutHtml: renderAboutHtml
     };
 })();

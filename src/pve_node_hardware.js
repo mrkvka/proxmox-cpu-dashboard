@@ -117,6 +117,11 @@ Ext.define('PVE.node.HardwareView', {
                 itemId: 'pveHwInventoryHost',
                 html: '<div class="pve-hw-wrap">' + gettext('Loading hardware inventory…') + '</div>'
             }]
+        }, {
+            xtype: 'box',
+            itemId: 'pveHwAbout',
+            margin: '0 10 8 10',
+            html: '<div class="pve-hw-about">' + gettext('Loading…') + '</div>'
         }];
 
         me.callParent();

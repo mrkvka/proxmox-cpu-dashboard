@@ -10,9 +10,11 @@ DEB="$ROOT/dist/${PKG}_${VERSION}_all.deb"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/DEBIAN" "$STAGE/usr/share/pve-node-hw-ui"
 
+bash "$ROOT/scripts/gen-build-info.sh" "$ROOT/src/pve_hw_build_info.js"
 install -m 644 "$ROOT/VERSION" "$STAGE/usr/share/pve-node-hw-ui/VERSION"
 install -m 644 "$ROOT/src/pve_node_summary.js" "$STAGE/usr/share/pve-node-hw-ui/"
-install -m 644 "$ROOT/src/pve_node_hardware.js" "$STAGE/usr/share/pve-node-hw-ui/"
+install -m 644 "$ROOT/src/pve_node_hardware.js"
+install -m 644 "$ROOT/src/pve_hw_build_info.js" "$STAGE/usr/share/pve-node-hw-ui/" "$STAGE/usr/share/pve-node-hw-ui/"
 install -m 755 "$ROOT/install-ui.sh" "$STAGE/usr/share/pve-node-hw-ui/install-ui.sh"
 install -m 755 "$ROOT/uninstall-ui.sh" "$STAGE/usr/share/pve-node-hw-ui/uninstall-ui.sh"
 

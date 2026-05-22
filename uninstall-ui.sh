@@ -16,10 +16,12 @@ if [[ -n "$INDEX_BAK" && -f "$INDEX_BAK" ]]; then
 else
     sed -i '\|/pve2/js/pve_node_summary.js|d' "$INDEX_TPL"
     sed -i '\|/pve2/js/pve_node_hardware.js|d' "$INDEX_TPL"
+    sed -i '\|/pve2/js/pve_hw_build_info.js|d' "$INDEX_TPL"
 fi
 
 rm -f /usr/share/pve-manager/js/pve_node_summary.js
 rm -f /usr/share/pve-manager/js/pve_node_hardware.js
+rm -f /usr/share/pve-manager/js/pve_hw_build_info.js
 rm -rf "$SHARE_UI"
 
 systemctl restart pveproxy
