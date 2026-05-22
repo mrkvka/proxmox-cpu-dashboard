@@ -70,8 +70,8 @@ echo "FAILED: apt-get update exited with $UPDATE_RC"
 echo "$UPDATE_OUT" | tail -n 40
 echo ""
 
-if echo "$UPDATE_OUT" | grep -qiE '401|403|enterprise\.proxmox'; then
-    echo "LIKELY CAUSE: pve-enterprise (or ceph enterprise) without a subscription."
+if echo "$UPDATE_OUT" | grep -qiE '401|403|enterprise\.proxmox|ceph-squid'; then
+    echo "LIKELY CAUSE: pve-enterprise or ceph-squid enterprise repo without a subscription."
     echo "FIX: run this script with --apply, then apt-get update again."
 fi
 if echo "$UPDATE_OUT" | grep -qi 'NO_PUBKEY'; then
@@ -101,6 +101,32 @@ fix_list_file() {
 
 fix_list_file /etc/apt/sources.list.d/pve-enterprise.list
 fix_list_file /etc/apt/sources.list.d/ceph.list
+
+# PVE 9+ deb822: enterprise ceph-squid causes 401 without subscription
+CEPH_SOURCES=/etc/apt/sources.list.d/ceph.sources
+if [ -f "$CEPH_SOURCES" ] && grep -q 'enterprise.proxmox.com/debian/ceph' "$CEPH_SOURCES"; then
+    cp -a "$CEPH_SOURCES" "${CEPH_SOURCES}.bak_${TS}"
+    cat > "$CEPH_SOURCES" <<EOF
+Types: deb
+URIs: http://download.proxmox.com/debian/ceph-squid
+Suites: $SUITE
+Components: no-subscription
+Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
+EOF
+    echo "Wrote $CEPH_SOURCES (ceph-squid no-subscription)"
+fi
+
+# Disable enterprise deb822 if present (proxmox.sources may already be no-subscription)
+PVE_ENT=/etc/apt/sources.list.d/pve-enterprise.sources
+if [ -f "$PVE_ENT" ] && ! grep -q '^Enabled: false' "$PVE_ENT"; then
+    cp -a "$PVE_ENT" "${PVE_ENT}.bak_${TS}"
+    if grep -q '^Enabled:' "$PVE_ENT"; then
+        sed -i 's/^Enabled:.*/Enabled: false/' "$PVE_ENT"
+    else
+        echo "Enabled: false" >> "$PVE_ENT"
+    fi
+    echo "Disabled $PVE_ENT"
+fi
 
 NO_SUB=/etc/apt/sources.list.d/pve-no-subscription.list
 if [ -f "$NO_SUB" ]; then
