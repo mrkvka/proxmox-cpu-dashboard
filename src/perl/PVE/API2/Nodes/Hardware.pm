@@ -42,7 +42,7 @@ sub pve_hw_apply_args {
 }
 
 sub register_api {
-    my $pkg = 'PVE::API2::Nodes';
+    my $pkg = 'PVE::API2::Nodes::Nodeinfo';
 
     $pkg->register_method({
         name => 'hw',
