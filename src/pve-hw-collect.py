@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-VERSION = "2.3.1"
+VERSION = "2.3.2"
 
 
 def read_text(path: str) -> str | None:
@@ -375,13 +375,19 @@ def collect_storage() -> list[dict[str, Any]]:
         hours = nvme.get("power_on_hours")
         data_read_u = nvme.get("data_units_read")
         data_written_u = nvme.get("data_units_written")
-        if temp is None:
-            for item in (smart.get("ata_smart_attributes") or {}).get("table") or []:
-                label = (item.get("name") or "").lower()
-                if label == "temperature_celsius":
-                    temp = item.get("raw", {}).get("value")
-                if label == "power_on_hours":
-                    hours = hours or item.get("raw", {}).get("value")
+        data_read_gib = _nvme_units_to_gib(data_read_u)
+        data_written_gib = _nvme_units_to_gib(data_written_u)
+        for item in (smart.get("ata_smart_attributes") or {}).get("table") or []:
+            label = (item.get("name") or "").lower()
+            raw_val = item.get("raw", {}).get("value")
+            if label == "temperature_celsius" and temp is None:
+                temp = raw_val
+            if label == "power_on_hours":
+                hours = hours or raw_val
+            if label == "total_lbas_written":
+                data_written_gib = data_written_gib or _lba_sectors_to_gib(raw_val)
+            if label == "total_lbas_read":
+                data_read_gib = data_read_gib or _lba_sectors_to_gib(raw_val)
         queue = f"/sys/block/{name}/queue"
         disks.append({
             "name": name,
@@ -396,8 +402,8 @@ def collect_storage() -> list[dict[str, Any]]:
             "temperature_c": temp,
             "wear_percent": wear,
             "power_on_hours": hours,
-            "data_read_gib": _nvme_units_to_gib(data_read_u),
-            "data_written_gib": _nvme_units_to_gib(data_written_u),
+            "data_read_gib": data_read_gib,
+            "data_written_gib": data_written_gib,
             "scheduler": read_text(os.path.join(queue, "scheduler")) if os.path.isdir(queue) else "",
             "read_ahead_kb": read_int(os.path.join(queue, "read_ahead_kb")),
             "max_sectors_kb": read_int(os.path.join(queue, "max_sectors_kb")),
@@ -513,6 +519,15 @@ def _nvme_units_to_gib(units: Any) -> float | None:
         return None
     try:
         return int(units) * 512000 / (1024 ** 3)
+    except (TypeError, ValueError):
+        return None
+
+
+def _lba_sectors_to_gib(sectors: Any, sector_size: int = 512) -> float | None:
+    if sectors is None:
+        return None
+    try:
+        return int(sectors) * sector_size / (1024 ** 3)
     except (TypeError, ValueError):
         return None
 
