@@ -1,28 +1,30 @@
 # Changelog
 
-## [3.3.0] — 2026-05-22
+## [3.4.0] — 2026-05-22
 
-### P1 — product quality (complete)
+### Split packages for distribution
 
-- **`VERSION`** file — single source for install, collector, package
-- **`/usr/share/pve-node-hw-api/`** — installed package tree with docs
-- **`install.sh --api-only`** — API without UI / `index.html.tpl` changes
-- **`.deb` package** `proxmox-node-hw-api` — `make deb` / `scripts/build-deb.sh`
-- **UPGRADE.md**, **CONTRIBUTING.md**, **Makefile**
-- Collector **`warnings[]`** when sensors/smartctl/cpufreq missing
-- Install layout suitable for repeatable upgrades after `pve-manager` updates
+- **proxmox-node-hw-api** — `install-api.sh`, `uninstall-api.sh`, `build-deb-api.sh`
+- **proxmox-node-hw-ui** — `install-ui.sh`, `uninstall-ui.sh`, `build-deb-ui.sh` (Depends on API same version)
+- `install.sh` / `uninstall.sh` — convenience wrappers (API+UI)
+- `scripts/verify-ui.sh` — UI install checks
+- `make deb-api` / `make deb-ui` / `make deb`
 
-## [3.2.0] — 2026-05-22
+## [3.3.0]
 
-API-first cleanup: docs/API.md, CI, no HA/legacy in repo.
+Product quality: VERSION file, `/usr/share/pve-node-hw-api/`, `make deb`, warnings[].
 
-## [3.1.0] — 2026-05-22
+## [3.2.0]
 
-P0: Hardware.pm, verify/uninstall scripts, CPU confirm dialog.
+API-first docs, CI, no HA in repo.
 
-## [3.0.0] — 2026-05-22
+## [3.1.0]
 
-Stable Hardware tab, live inventory, GiB metrics.
+P0: Hardware.pm, verify scripts, CPU confirm.
+
+## [3.0.0]
+
+Stable Hardware tab and live inventory.
 
 ## [0.5.0]
 

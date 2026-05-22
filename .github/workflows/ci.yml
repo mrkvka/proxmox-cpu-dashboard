@@ -12,8 +12,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Version file present
-        run: test -f VERSION && grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' VERSION
+      - name: Version file
+        run: grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' VERSION
 
       - name: Python tests
         run: |
@@ -29,10 +29,10 @@ jobs:
       - name: Shellcheck
         run: |
           sudo apt-get install -y shellcheck
-          shellcheck install.sh uninstall.sh scripts/*.sh src/patch-nodes.sh
+          shellcheck install.sh install-api.sh install-ui.sh uninstall*.sh scripts/*.sh src/patch-nodes.sh
 
-      - name: Build .deb (dry)
+      - name: Build both .deb packages
         run: |
           sudo apt-get install -y dpkg-dev
           bash scripts/build-deb.sh
-          test -f dist/proxmox-node-hw-api_*.deb
+          ls -la dist/proxmox-node-hw-api_*.deb dist/proxmox-node-hw-ui_*.deb

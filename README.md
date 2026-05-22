@@ -2,71 +2,80 @@
 
 Hardware inventory and CPU control for **Proxmox VE 9.x** via the native PVE API (`:8006`).
 
-**Version:** see [`VERSION`](VERSION) · **Docs:** [docs/API.md](docs/API.md) · **Upgrade:** [UPGRADE.md](UPGRADE.md)
+Two installable components:
 
-## Install
+| Package | Purpose |
+|---------|---------|
+| **proxmox-node-hw-api** | `/nodes/{node}/hw*` JSON API — for scripts, monitoring, Home Assistant, etc. |
+| **proxmox-node-hw-ui** | **Node → Hardware** tab in the web UI (requires API package) |
 
-**From git (on the Proxmox host):**
+**Version:** [`VERSION`](VERSION) · **API docs:** [docs/API.md](docs/API.md)
+
+## Install from git
+
+**API only** (automation / external clients):
 
 ```bash
 git clone https://github.com/mrkvka/proxmox-cpu-dashboard.git
 cd proxmox-cpu-dashboard
-bash install.sh              # API + Hardware tab UI
-# bash install.sh --api-only   # API only, no ExtJS changes
-bash scripts/verify-patch.sh
-```
-
-**From .deb:**
-
-```bash
-make deb
-dpkg -i dist/proxmox-node-hw-api_*_all.deb
-```
-
-**API check:**
-
-```bash
+bash install-api.sh
 pvesh get /nodes/$(hostname -s)/hw
 ```
 
-Optional UI: **Node → Hardware** → Ctrl+Shift+R.
+**API + UI** (full experience):
 
-## Product layout
+```bash
+bash install-api.sh
+bash install-ui.sh
+# or: bash install.sh
+```
 
-| Path | Role |
-|------|------|
-| `/usr/share/pve-node-hw-api/` | Package files, docs, `VERSION` |
-| `/usr/share/perl5/PVE/API2/Nodes/Hardware.pm` | API registration |
-| `/usr/local/bin/pve-hw-collect.py` | Data collector |
-| `/nodes/{node}/hw*` | HTTP API (see [docs/API.md](docs/API.md)) |
+**Ctrl+Shift+R** in the browser after UI install.
 
-## Compatibility
+## Install from .deb
 
-| Component | Supported |
-|-----------|-----------|
-| Proxmox VE | 9.0 – 9.x |
-| CPU | Intel / AMD |
-| Sensors | `lm-sensors` |
-| Disks | `smartctl` (recommended) |
+```bash
+make deb-api    # or: make deb  (both packages)
+make deb-ui
+dpkg -i dist/proxmox-node-hw-api_*_all.deb
+dpkg -i dist/proxmox-node-hw-ui_*_all.deb
+```
+
+`proxmox-node-hw-ui` depends on the same version of `proxmox-node-hw-api`.
+
+## Uninstall
+
+```bash
+bash uninstall-ui.sh    # first, if UI was installed
+bash uninstall-api.sh
+# or: bash uninstall.sh
+```
+
+## Paths on the host
+
+| Path | Package |
+|------|---------|
+| `/usr/share/pve-node-hw-api/` | API scripts, docs, `VERSION` |
+| `/usr/share/pve-node-hw-ui/` | UI JS sources |
+| `/usr/local/bin/pve-hw-collect.py` | Collector |
+
+## After `apt upgrade pve-manager`
+
+```bash
+bash install-api.sh
+bash install-ui.sh   # if you use the tab
+```
+
+See [UPGRADE.md](UPGRADE.md).
 
 ## Development
 
 ```bash
 make test
-make shellcheck
+make deb
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Uninstall
-
-```bash
-bash uninstall.sh
-```
-
-## Security
-
-[SECURITY.md](SECURITY.md) · [CHANGELOG.md](CHANGELOG.md)
+[CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) · [CHANGELOG.md](CHANGELOG.md)
 
 ## License
 
