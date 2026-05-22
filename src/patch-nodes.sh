@@ -18,7 +18,7 @@ if [ ! -f "$HW_PM" ]; then
 fi
 
 # Remove legacy inline patches from older dashboard versions
-perl -i -0777 -pe 's/\n# PVE CPU Dashboard native hardware API.*?\n(?=package PVE::API2::Nodes;\n)//s' "$FILE" 2>/dev/null || true
+perl -i -0777 -pe 's/\n# PVE CPU Dashboard native hardware API.*?(\npackage PVE::API2::Nodes;\n)/$1/s' "$FILE" 2>/dev/null || true
 perl -i -0777 -pe 's/\n# CPU Frequency control endpoint.*?\n\}\);\n//s' "$FILE" 2>/dev/null || true
 perl -i -0777 -pe 's/\n# PVE-HW-DASHBOARD: begin.*?\n# PVE-HW-DASHBOARD: end\n//s' "$FILE" 2>/dev/null || true
 

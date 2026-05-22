@@ -37,10 +37,12 @@ fi
 
 if grep -qF 'PVE-HW-DASHBOARD: begin' "$NODES_PM"; then
     echo "OK: Nodes.pm already patched (reinstall safe)"
+elif grep -qF "path => 'hw'" "$NODES_PM" && grep -qF 'pve-hw-collect.py' "$NODES_PM"; then
+    echo "OK: Nodes.pm has hardware API (will migrate to Hardware.pm on install)"
 elif grep -qF 'package PVE::API2::Nodes;' "$NODES_PM" && grep -qE 'thermalstate.*sensors -jA' "$NODES_PM"; then
     echo "OK: Nodes.pm anchor found (stock thermalstate)"
-elif grep -qF 'PVE::API2::Nodes::Hardware' "$NODES_PM"; then
-    echo "OK: Nodes.pm has hardware module reference"
+elif grep -qF 'package PVE::API2::Nodes;' "$NODES_PM"; then
+    echo "OK: Nodes.pm layout (PVE 9.x combined file)"
 else
     echo "ERROR: Nodes.pm does not match expected Proxmox 9.x layout."
     echo "       Re-run after pve-manager upgrade or open a GitHub issue with: pveversion -v"
