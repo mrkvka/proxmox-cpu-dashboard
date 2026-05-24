@@ -1,12 +1,17 @@
-/* Minimal ExtJS plugin: register Node → Hardware tab (requires pve_hw_tab.js) */
+/* Minimal ExtJS plugin: Node → Hardware tab only (not VM/CT). Requires pve_hw_tab.js */
 Ext.define('PVE.panel.Config', {
     override: 'PVE.panel.Config',
 
     insertNodes: function(items) {
         var me = this;
-        var caps = Ext.state.Manager.get('GuiCap');
         var list = items || [];
 
+        /* PVE.node.Config only — qemu/lxc also extend PVE.panel.Config and have itemId "summary" */
+        if (me.$className !== 'PVE.node.Config') {
+            return this.callParent([list]);
+        }
+
+        var caps = Ext.state.Manager.get('GuiCap');
         if (caps.nodes && caps.nodes['Sys.Audit'] && !(me.savedItems && me.savedItems.pvehardware)) {
             var hwTab = {
                 xtype: 'pveNodeHardware',
@@ -17,7 +22,7 @@ Ext.define('PVE.panel.Config', {
             var expanded = [];
             list.forEach(function(item) {
                 expanded.push(item);
-                if (item && item.itemId === 'summary') {
+                if (item && item.xtype === 'pveNodeSummary') {
                     expanded.push(hwTab);
                 }
             });

@@ -1,5 +1,11 @@
 # Changelog
 
+## [3.5.2] — 2026-05-23
+
+### Fix
+
+- Hardware tab only on **node** config (`PVE.node.Config`), not on VM/CT guests
+
 ## [3.5.1] — 2026-05-23
 
 ### Fix

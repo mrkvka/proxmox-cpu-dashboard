@@ -15,7 +15,7 @@ Sources live in `src/ui/`; installed copies under `/usr/share/pve-manager/js/` a
 
 ## Why not patch `pve_node_summary.js`?
 
-Replacing stock Proxmox Summary JS breaks on every `pve-manager` upgrade. The plugin only overrides `PVE.panel.Config.insertNodes` to add one menu entry — the smallest stable hook available today.
+Replacing stock Proxmox Summary JS breaks on every `pve-manager` upgrade. The plugin overrides `PVE.panel.Config.insertNodes` but **only when `$className === 'PVE.node.Config'`** (physical node, not VM/CT). It also matches `xtype: 'pveNodeSummary'`, not guest summary tabs to add one menu entry — the smallest stable hook available today.
 
 ## Upstream direction
 

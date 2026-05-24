@@ -15,6 +15,8 @@ class UiLayoutTests(unittest.TestCase):
         plugin = (UI / "pve_hw_plugin.js").read_text(encoding="utf-8")
         self.assertIn("override: 'PVE.panel.Config'", plugin)
         self.assertNotIn("HardwareView", plugin)
+        self.assertIn("PVE.node.Config", plugin)
+        self.assertIn("pveNodeSummary", plugin)
 
     def test_tab_defines_hardware_view(self):
         tab = (UI / "pve_hw_tab.js").read_text(encoding="utf-8")
