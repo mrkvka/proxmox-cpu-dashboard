@@ -42,6 +42,22 @@ class FormatterTests(unittest.TestCase):
         self.assertEqual(est["storage_w"], 10.5)
         self.assertGreater(est["load_total_w"], est["idle_total_w"])
 
+    def test_network_iface_kind(self):
+        self.assertEqual(mod._network_iface_kind("wlan0", "/nonexistent"), "Wi-Fi")
+        self.assertEqual(mod._network_iface_kind("eth0", "/nonexistent"), "Ethernet")
+
+    def test_network_inventory_subgroup(self):
+        inv = mod.build_inventory({
+            "network": [
+                {"name": "eth0", "kind": "Ethernet", "driver": "igb", "mac": "aa", "operstate": "up", "carrier": 1, "ethtool": {}},
+                {"name": "wlan0", "kind": "Wi-Fi", "driver": "iwlwifi", "mac": "bb", "operstate": "down", "ethtool": {}},
+            ],
+        })
+        net = next(s for s in inv if s.get("id") == "network")
+        self.assertEqual(len(net["subgroups"]), 2)
+        self.assertEqual(net["subgroups"][0]["id"], "eth0")
+        self.assertNotIn("net-eth0", [s.get("id") for s in inv])
+
 
 if __name__ == "__main__":
     unittest.main()

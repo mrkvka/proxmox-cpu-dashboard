@@ -14,7 +14,7 @@ var PVECPUDash = (function() {
             '.pve-hw-table td.avail{width:32%}',
             '.pve-hw-table td.applied{width:32%;font-weight:600}',
             '.pve-hw-table td.src{width:8%;font-size:9px;opacity:.55}',
-            '.pve-hw-h3{margin:10px 0 4px;font-size:11px;font-weight:700;text-transform:uppercase;opacity:.8}',
+            '.pve-hw-h3{margin:10px 0 4px;font-size:11px;font-weight:700;text-transform:uppercase;opacity:.8}','.pve-hw-subgroup td{padding:6px 8px!important;font-size:10px;font-weight:700;text-transform:uppercase;opacity:.85;background:rgba(128,128,128,.14);border-top:2px solid rgba(128,128,128,.45)}',
             '.pve-hw-panel{margin:4px 10px 8px;padding:8px 10px!important;border:1px solid rgba(128,128,128,.35);border-radius:4px}',
             '.pve-hw-label{font-size:10px;font-weight:700;text-transform:uppercase;opacity:.7}',
             '.pve-hw-row-warn td.applied{color:#d97706}',
@@ -84,10 +84,32 @@ var PVECPUDash = (function() {
         return esc(s).replace(/"/g, '&quot;');
     }
 
+    function sectionRowEntries(section) {
+        var sid = section.id || section.title || 'section';
+        var entries = [];
+        if (section.subgroups && section.subgroups.length) {
+            section.subgroups.forEach(function(sub) {
+                var gid = sub.id || sub.title || 'group';
+                (sub.rows || []).forEach(function(row) {
+                    entries.push({ sectionId: sid, groupId: gid, row: row });
+                });
+            });
+        } else {
+            (section.rows || []).forEach(function(row) {
+                entries.push({ sectionId: sid, groupId: '', row: row });
+            });
+        }
+        return entries;
+    }
+
+    function inventoryRowKey(sectionId, groupId, param) {
+        return String(sectionId || '') + '::' + String(groupId || '') + '::' + String(param || '');
+    }
+
     function inventoryRowCount(sections) {
         var n = 0;
         (sections || []).forEach(function(section) {
-            n += (section.rows || []).length;
+            n += sectionRowEntries(section).length;
         });
         return n;
     }
@@ -106,17 +128,36 @@ var PVECPUDash = (function() {
                 '<th>' + gettext('Applied now') + '</th>' +
                 '<th>' + gettext('Source') + '</th>' +
                 '</tr></thead><tbody>');
-            (section.rows || []).forEach(function(row) {
-                var applied = cellValue(row);
-                var available = row.available != null ? row.available : '—';
-                var cls = rowClass(row.parameter, applied);
-                html.push('<tr class="' + cls + '" data-pve-hw-row="' + escAttr(rowKey(sid, row.parameter)) + '">' +
-                    '<td class="param">' + esc(row.parameter) + '</td>' +
-                    '<td class="avail">' + esc(available) + '</td>' +
-                    '<td class="applied">' + esc(applied) + '</td>' +
-                    '<td class="src">' + esc(row.source || '') + '</td>' +
-                    '</tr>');
-            });
+            if (section.subgroups && section.subgroups.length) {
+                section.subgroups.forEach(function(sub) {
+                    var gid = sub.id || sub.title || 'group';
+                    html.push('<tr class="pve-hw-subgroup" data-pve-hw-subgroup="' + escAttr(gid) + '">' +
+                        '<td colspan="4">' + esc(sub.title || gid) + '</td></tr>');
+                    (sub.rows || []).forEach(function(row) {
+                        var applied = cellValue(row);
+                        var available = row.available != null ? row.available : '—';
+                        var cls = rowClass(row.parameter, applied);
+                        html.push('<tr class="' + cls + '" data-pve-hw-row="' + escAttr(inventoryRowKey(sid, gid, row.parameter)) + '">' +
+                            '<td class="param">' + esc(row.parameter) + '</td>' +
+                            '<td class="avail">' + esc(available) + '</td>' +
+                            '<td class="applied">' + esc(applied) + '</td>' +
+                            '<td class="src">' + esc(row.source || '') + '</td>' +
+                            '</tr>');
+                    });
+                });
+            } else {
+                (section.rows || []).forEach(function(row) {
+                    var applied = cellValue(row);
+                    var available = row.available != null ? row.available : '—';
+                    var cls = rowClass(row.parameter, applied);
+                    html.push('<tr class="' + cls + '" data-pve-hw-row="' + escAttr(inventoryRowKey(sid, '', row.parameter)) + '">' +
+                        '<td class="param">' + esc(row.parameter) + '</td>' +
+                        '<td class="avail">' + esc(available) + '</td>' +
+                        '<td class="applied">' + esc(applied) + '</td>' +
+                        '<td class="src">' + esc(row.source || '') + '</td>' +
+                        '</tr>');
+                });
+            }
             html.push('</tbody></table>');
         });
         html.push('</div>');
@@ -202,10 +243,10 @@ var PVECPUDash = (function() {
         var byKey = {};
         var byParam = {};
         (sections || []).forEach(function(section) {
-            var sid = section.id || section.title || 'section';
-            (section.rows || []).forEach(function(row) {
-                byKey[rowKey(sid, row.parameter)] = row;
-                byParam[String(row.parameter)] = row;
+            sectionRowEntries(section).forEach(function(entry) {
+                var key = inventoryRowKey(entry.sectionId, entry.groupId, entry.row.parameter);
+                byKey[key] = entry.row;
+                byParam[String(entry.row.parameter)] = entry.row;
             });
         });
         return { byKey: byKey, byParam: byParam };

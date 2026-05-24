@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.5.3] — 2026-05-23
+
+### Network inventory
+
+- One **Network** section with subgroups per interface (Ethernet, Wi-Fi, bridge, …)
+- Detect kind/MAC/wireless mode; sort Ethernet before Wi-Fi
+
 ## [3.5.2] — 2026-05-23
 
 ### Fix

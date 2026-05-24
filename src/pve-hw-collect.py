@@ -649,10 +649,71 @@ def collect_memory_modules() -> list[dict[str, Any]]:
     return modules
 
 
+_NET_ARPHRD = {
+    1: "Ethernet",
+    772: "Wi-Fi",
+    32: "InfiniBand",
+    512: "PPP",
+    768: "IPIP",
+    65534: "Tunnel",
+}
+
+
+def _network_iface_kind(name: str, path: str) -> str:
+    if os.path.isdir(os.path.join(path, "wireless")):
+        return "Wi-Fi"
+    type_id = read_int(os.path.join(path, "type"))
+    if type_id in _NET_ARPHRD:
+        return _NET_ARPHRD[type_id]
+    lower = name.lower()
+    if lower.startswith(("wlan", "wlp", "wl")):
+        return "Wi-Fi"
+    if lower.startswith(("eth", "enp", "eno", "ens", "em", "p")):
+        return "Ethernet"
+    if lower.startswith(("br", "docker", "virbr")):
+        return "Bridge"
+    if lower.startswith(("bond", "team")):
+        return "Bond"
+    return "Network"
+
+
+def _network_subgroup_title(iface: dict[str, Any]) -> str:
+    parts = [iface.get("name") or "?"]
+    if iface.get("kind"):
+        parts.append(str(iface["kind"]))
+    if iface.get("driver"):
+        parts.append(str(iface["driver"]))
+    return " · ".join(parts)
+
+
+def _network_iface_rows(iface: dict[str, Any]) -> list[dict[str, Any]]:
+    eth = iface.get("ethtool") or {}
+    max_speed = eth.get("Supported link modes") or eth.get("Speed")
+    if not max_speed and iface.get("speed_mbps"):
+        max_speed = f"{iface['speed_mbps']} Mbps"
+    cur_speed = eth.get("Speed")
+    if not cur_speed and iface.get("speed_mbps"):
+        cur_speed = f"{iface['speed_mbps']} Mbps"
+    rows = [
+        _row("Kind", "detected", iface.get("kind"), "sysfs"),
+        _row("MAC", "hardware", iface.get("mac"), "sysfs"),
+        _row("Operstate", "up / down", iface.get("operstate"), "sysfs"),
+        _row("Link", "carrier", "up" if iface.get("carrier") == 1 else "down", "sysfs"),
+        _row("Speed", max_speed or "—", cur_speed or "—", "ethtool"),
+        _row("Duplex", "full / half", iface.get("duplex") or eth.get("Duplex") or "—", "ethtool"),
+        _row("Driver", iface.get("driver"), iface.get("driver"), "ethtool"),
+    ]
+    if iface.get("wireless_mode"):
+        rows.append(_row("Wireless mode", "802.11", iface.get("wireless_mode"), "sysfs"))
+    return rows
+
+
 def collect_network() -> list[dict[str, Any]]:
     interfaces = []
+    skip_exact = {"lo", "bonding_masters"}
+    skip_prefixes = ("veth", "fwbr", "fwpr", "tap", "vmbr")
     for iface in sorted(os.listdir("/sys/class/net")):
-        if iface in ("lo", "bonding_masters") or iface.startswith(("veth", "fwbr", "fwpr", "tap", "vmbr")):
+        if iface in skip_exact or iface.startswith(skip_prefixes):
             continue
         path = f"/sys/class/net/{iface}"
         ethtool = {}
@@ -663,15 +724,25 @@ def collect_network() -> list[dict[str, Any]]:
                     if ":" in line:
                         k, v = line.split(":", 1)
                         ethtool[k.strip()] = v.strip()
+        kind = _network_iface_kind(iface, path)
+        wireless_mode = None
+        wmode = read_text(os.path.join(path, "wireless", "mode"))
+        if wmode:
+            wireless_mode = wmode
         interfaces.append({
             "name": iface,
+            "kind": kind,
+            "mac": read_text(os.path.join(path, "address")),
             "carrier": read_int(os.path.join(path, "carrier")),
             "speed_mbps": read_int(os.path.join(path, "speed")),
             "duplex": read_text(os.path.join(path, "duplex")),
             "operstate": read_text(os.path.join(path, "operstate")),
             "driver": ethtool.get("driver"),
+            "wireless_mode": wireless_mode,
             "ethtool": ethtool,
         })
+    kind_order = {"Ethernet": 0, "Wi-Fi": 1, "InfiniBand": 2, "Bond": 3, "Bridge": 4, "Network": 5}
+    interfaces.sort(key=lambda item: (kind_order.get(item.get("kind") or "", 9), item.get("name") or ""))
     return interfaces
 
 
@@ -868,18 +939,18 @@ def build_inventory(data: dict[str, Any]) -> list[dict[str, Any]]:
         ],
     })
 
-    for iface in data.get("network") or []:
-        eth = iface.get("ethtool") or {}
-        max_speed = eth.get("Supported link modes") or eth.get("Speed") or iface.get("speed_mbps")
-        cur_speed = eth.get("Speed") or iface.get("speed_mbps")
+    network_ifaces = data.get("network") or []
+    if network_ifaces:
         sections.append({
-            "id": f"net-{iface.get('name')}",
-            "title": f"Network: {iface.get('name')}",
-            "rows": [
-                _row("Operstate", "up / down", iface.get("operstate"), "sysfs"),
-                _row("Link", "carrier", "up" if iface.get("carrier") == 1 else "down", "sysfs"),
-                _row("Speed", max_speed or "—", cur_speed or "—", "ethtool"),
-                _row("Driver", iface.get("driver"), iface.get("driver"), "ethtool"),
+            "id": "network",
+            "title": "Network",
+            "subgroups": [
+                {
+                    "id": iface.get("name") or f"iface-{idx}",
+                    "title": _network_subgroup_title(iface),
+                    "rows": _network_iface_rows(iface),
+                }
+                for idx, iface in enumerate(network_ifaces)
             ],
         })
 
