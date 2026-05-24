@@ -32,7 +32,7 @@ jobs:
       - name: Shellcheck
         run: |
           sudo apt-get install -y shellcheck
-          shellcheck install.sh install-api.sh install-ui.sh uninstall*.sh scripts/*.sh src/patch-nodes.sh
+          shellcheck -S error install.sh install-api.sh install-ui.sh uninstall*.sh scripts/*.sh src/patch-nodes.sh
 
       - name: Build both .deb packages
         run: |
