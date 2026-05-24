@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest an improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      placeholder: I want to see GPU power / export inventory to Prometheus…
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Collector / inventory
+        - REST API
+        - Web UI (Hardware tab)
+        - Install / packaging
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: I am OK with API-only changes (no UI)
+        - label: I can test on Proxmox VE 9.x

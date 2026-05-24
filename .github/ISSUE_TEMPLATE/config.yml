@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security
+    url: https://github.com/mrkvka/proxmox-cpu-dashboard/blob/master/SECURITY.md
+    about: Trust model and reporting
+  - name: API documentation
+    url: https://github.com/mrkvka/proxmox-cpu-dashboard/blob/master/docs/API.md
+    about: Native PVE endpoints on port 8006

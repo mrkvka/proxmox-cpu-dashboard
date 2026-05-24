@@ -1,0 +1,57 @@
+name: Bug report
+description: Something broken on Proxmox VE
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Include PVE version and verify script output when possible.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      placeholder: Hardware tab missing, API error, wrong power reading…
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: pveversion
+    attributes:
+      label: Output of `pveversion -v`
+      render: shell
+      placeholder: Paste first ~10 lines
+    validations:
+      required: true
+
+  - type: textarea
+    id: verify
+    attributes:
+      label: Output of `bash scripts/verify-patch.sh` (and `verify-ui.sh` if UI)
+      render: shell
+
+  - type: dropdown
+    id: components
+    attributes:
+      label: Component
+      options:
+        - API only (proxmox-node-hw-api)
+        - API + UI (Hardware tab)
+        - Install / upgrade
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Installed package version
+      placeholder: e.g. 3.5.3 from /usr/share/pve-node-hw-api/VERSION

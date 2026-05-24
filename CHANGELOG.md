@@ -2,6 +2,10 @@
 
 ## [3.5.3] — 2026-05-23
 
+### Public release
+
+- GitHub Releases + `.deb` assets, CI release workflow, issue templates, README screenshots
+
 ### Network inventory
 
 - One **Network** section with subgroups per interface (Ethernet, Wi-Fi, bridge, …)

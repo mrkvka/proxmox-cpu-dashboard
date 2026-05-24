@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: ver
+        run: |
+          V="$(tr -d '[:space:]' < VERSION)"
+          echo "version=${V}" >> "$GITHUB_OUTPUT"
+          test "v${V}" = "${GITHUB_REF_NAME}"
+
+      - name: Python tests
+        run: |
+          python3 -m py_compile src/pve-hw-collect.py src/pve-hw-apply.py
+          python3 -m unittest discover -s tests -p 'test_*.py' -v
+
+      - name: Build .deb packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y dpkg-dev
+          bash scripts/build-deb.sh
+          ls -la dist/proxmox-node-hw-api_*.deb dist/proxmox-node-hw-ui_*.deb
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release v${{ steps.ver.outputs.version }}
+          generate_release_notes: true
+          body_path: docs/RELEASE.md
+          files: |
+            dist/proxmox-node-hw-api_${{ steps.ver.outputs.version }}_all.deb
+            dist/proxmox-node-hw-ui_${{ steps.ver.outputs.version }}_all.deb
