@@ -20,11 +20,14 @@ jobs:
           python3 -m py_compile src/pve-hw-collect.py src/pve-hw-apply.py
           python3 -m unittest discover -s tests -p 'test_*.py' -v
 
-      - name: Perl syntax
+      - name: Perl module check
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y libjson-perl
-          perl -c src/perl/PVE/API2/Nodes/Hardware.pm
+          test -f src/perl/PVE/API2/Nodes/Hardware.pm
+          grep -q 'package PVE::API2::Nodes::Hardware' src/perl/PVE/API2/Nodes/Hardware.pm
+          perl -e 'use JSON; use strict; use warnings; print "JSON + Hardware.pm present\n"'
+          # Full `perl -c` needs Proxmox PVE::* modules — use scripts/verify-patch.sh on a PVE host
 
       - name: Shellcheck
         run: |

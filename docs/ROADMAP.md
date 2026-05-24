@@ -2,6 +2,8 @@
 
 ## Done
 
+- **v3.5.3** — GitHub Releases, `.deb` CI upload, issue templates, README screenshots
+
 | Phase | Focus |
 |-------|--------|
 | **P0** | Native PVE API (`Hardware.pm`), patch verify, CPU safety confirm, uninstall |
