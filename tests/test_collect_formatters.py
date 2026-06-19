@@ -42,6 +42,36 @@ class FormatterTests(unittest.TestCase):
         self.assertEqual(est["storage_w"], 10.5)
         self.assertGreater(est["load_total_w"], est["idle_total_w"])
 
+    def test_rapl_zone_role(self):
+        self.assertEqual(mod._rapl_zone_role("package-0", "/sys/class/powercap/intel-rapl:0"), "package")
+        self.assertEqual(mod._rapl_zone_role("", "/sys/class/powercap/amd-rapl"), "package")
+        self.assertEqual(mod._rapl_zone_role("psys", "/sys/class/powercap/intel-rapl:0:psys"), "psys")
+        self.assertEqual(mod._rapl_zone_role("core", "/sys/class/powercap/intel-rapl:0:core"), "core")
+
+    def test_resolve_power_totals_no_double_count(self):
+        est = {"memory_w": 11.2, "storage_w": 7.0, "platform_w": 25.0, "load_total_w": 180.0}
+        system_w, method, _conf = mod._resolve_power_totals(
+            package_watts=62.5,
+            psys_watts=None,
+            estimate=est,
+        )
+        self.assertEqual(method, "hybrid")
+        self.assertAlmostEqual(system_w, 105.7)
+
+        system_w, method, _conf = mod._resolve_power_totals(
+            package_watts=62.5,
+            psys_watts=140.0,
+            estimate=est,
+        )
+        self.assertEqual(method, "measured")
+        self.assertEqual(system_w, 140.0)
+
+    def test_energy_delta_w_wrap(self):
+        zone = {"max_energy_range_uj": 10_000_000_000, "_prev_energy_uj": 9_999_000_000}
+        watts = mod._energy_delta_w(zone, 500_000_000, 1.0)
+        self.assertIsNotNone(watts)
+        self.assertGreater(watts, 0)
+
     def test_network_iface_kind(self):
         self.assertEqual(mod._network_iface_kind("wlan0", "/nonexistent"), "Wi-Fi")
         self.assertEqual(mod._network_iface_kind("eth0", "/nonexistent"), "Ethernet")

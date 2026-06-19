@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.5.4] — 2026-06-19
+
+### Fix — CPU / system power
+
+- **CPU package** (`package_watts`): RAPL package zone only — no summing core/dram/psys zones
+- **System total** (`system_watts`): PSYS when available, else hybrid (package + RAM/disks/platform estimate), else heuristic
+- **Live polling** (`hwlive`): RAPL energy deltas cached in `/var/cache/pve-hw-dashboard/rapl_state.json` so HA polls get real watts without inflating readings
+
 ## [3.5.3] — 2026-05-23
 
 ### Public release

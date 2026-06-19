@@ -115,10 +115,11 @@ After `apt upgrade pve-manager`, re-run `bash install.sh` on the node.
 
 | Field | Description |
 |-------|-------------|
-| `system_watts` | Display power (W): measured RAPL/sensors, hybrid, or estimated total |
-| `package_watts` | CPU package from RAPL when available |
-| `method` | `measured`, `hybrid`, or `estimated` |
+| `system_watts` | Whole-node power (W): PSYS RAPL, hybrid package+estimate, or heuristic total |
+| `package_watts` | CPU package from RAPL only (never summed with core/dram) |
+| `psys_watts` | Platform PSYS RAPL when exposed by the kernel |
+| `method` | `measured` (PSYS), `hybrid` (package + component estimate), or `estimated` |
 | `confidence` | `low`, `medium` |
 | `estimate` | Heuristic breakdown: `cpu_tdp_w`, `memory_w`, `storage_w`, `platform_w`, `load_total_w`, `idle_total_w` |
-| `rapl_breakdown` | Per-zone RAPL readings |
+| `rapl_breakdown` | Per-zone RAPL readings with `role` (`package`, `psys`, `core`, `dram`) |
 

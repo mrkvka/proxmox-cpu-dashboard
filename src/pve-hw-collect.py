@@ -36,6 +36,13 @@ def package_version() -> str:
 
 VERSION = package_version()
 
+CACHE_DIR = Path("/var/cache/pve-hw-dashboard")
+STATIC_CACHE = CACHE_DIR / "static.json"
+RAPL_STATE_CACHE = CACHE_DIR / "rapl_state.json"
+LIVE_SMART_INTERVAL = 30
+RAPL_MIN_DELTA_S = 0.5
+RAPL_MAX_STALE_S = 180
+
 
 def read_text(path: str) -> str | None:
     try:
@@ -271,26 +278,128 @@ def collect_hwmon() -> list[dict[str, Any]]:
     return devices
 
 
-def _zone_power_w(zone: dict[str, Any], *, sample_energy: bool) -> float | None:
+def _rapl_zone_role(name: str, path: str) -> str:
+    """Classify a powercap zone; package and psys must not be double-counted."""
+    name_l = (name or "").lower()
+    base = os.path.basename(path).lower()
+    if "psys" in name_l or "psys" in base:
+        return "psys"
+    if "package" in name_l:
+        return "package"
+    if "dram" in name_l:
+        return "dram"
+    if "core" in name_l:
+        return "core"
+    if base in ("amd-rapl",) or (base.startswith("amd-rapl") and ":" not in base):
+        return "package"
+    if re.fullmatch(r"intel-rapl:\d+", base):
+        return "package"
+    return "other"
+
+
+def _energy_delta_w(
+    zone: dict[str, Any],
+    energy_uj: int,
+    delta_s: float,
+) -> float | None:
+    if delta_s < RAPL_MIN_DELTA_S:
+        return None
+    if delta_s > RAPL_MAX_STALE_S:
+        return None
+    prev_e = zone.get("_prev_energy_uj")
+    if not isinstance(prev_e, int):
+        return None
+    de = energy_uj - prev_e
+    if de < 0:
+        max_e = zone.get("max_energy_range_uj")
+        if isinstance(max_e, int) and max_e > 0:
+            de += max_e + 1
+        else:
+            return None
+    return round(de / delta_s / 1_000_000, 2)
+
+
+def _load_rapl_state() -> dict[str, Any]:
+    try:
+        if RAPL_STATE_CACHE.is_file():
+            data = json.loads(RAPL_STATE_CACHE.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {"zones": {}}
+
+
+def _save_rapl_state(state: dict[str, Any]) -> None:
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        RAPL_STATE_CACHE.write_text(json.dumps(state), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _zone_power_w(
+    zone: dict[str, Any],
+    *,
+    sample_energy: bool,
+    live: bool = False,
+    rapl_state: dict[str, Any] | None = None,
+) -> float | None:
     pu = zone.get("power_uw")
     if isinstance(pu, int) and pu > 0:
         return round(pu / 1_000_000, 2)
-    if not sample_energy:
-        return None
+
     energy_path = os.path.join(zone["path"], "energy_uj")
     if not os.path.isfile(energy_path):
         return None
-    e1 = read_int(energy_path)
+    energy_uj = read_int(energy_path)
+    if energy_uj is None:
+        return None
+
+    if live and rapl_state is not None:
+        now = time.time()
+        zones_cache = rapl_state.setdefault("zones", {})
+        prev = zones_cache.get(zone["path"])
+        watts = None
+        if isinstance(prev, dict) and isinstance(prev.get("energy_uj"), int) and isinstance(prev.get("ts"), (int, float)):
+            zone["_prev_energy_uj"] = prev["energy_uj"]
+            watts = _energy_delta_w(zone, energy_uj, now - float(prev["ts"]))
+        zones_cache[zone["path"]] = {"energy_uj": energy_uj, "ts": now}
+        return watts
+
+    if not sample_energy:
+        return None
+
+    e1 = energy_uj
     t1 = time.monotonic()
     time.sleep(0.12)
     e2 = read_int(energy_path)
     t2 = time.monotonic()
-    if e1 is None or e2 is None or t2 <= t1:
+    if e2 is None or t2 <= t1:
         return None
-    de = e2 - e1
-    if de < 0:
-        de += read_int(os.path.join(zone["path"], "max_energy_range_uj")) or 0
-    return round((de / (t2 - t1)) / 1_000_000, 2)
+    zone["_prev_energy_uj"] = e1
+    return _energy_delta_w(zone, e2, t2 - t1)
+
+
+def _resolve_power_totals(
+    *,
+    package_watts: float | None,
+    psys_watts: float | None,
+    estimate: dict[str, Any],
+) -> tuple[float | None, str, str]:
+    """Return (system_watts, method, confidence) without double-counting RAPL zones."""
+    if psys_watts is not None and psys_watts > 0:
+        return round(psys_watts, 2), "measured", "medium"
+    if package_watts is not None and package_watts > 0:
+        system_w = round(
+            package_watts
+            + float(estimate.get("memory_w") or 0)
+            + float(estimate.get("storage_w") or 0)
+            + float(estimate.get("platform_w") or 0),
+            1,
+        )
+        return system_w, "hybrid", "medium"
+    return estimate.get("load_total_w"), "estimated", "low"
 
 
 def _parse_tdp_w(cpu: dict[str, Any], processor_dmi: dict[str, str], system: dict[str, Any]) -> float:
@@ -370,10 +479,15 @@ def collect_powercap(
     system: dict[str, Any] | None = None,
     live: bool = False,
 ) -> dict[str, Any]:
+    rapl_state = _load_rapl_state() if live else None
     zones = []
     rapl_breakdown = []
+    package_watts = None
+    psys_watts = None
+
     for path in sorted(glob.glob("/sys/class/powercap/*")):
         zone: dict[str, Any] = {"path": path, "name": read_text(os.path.join(path, "name")) or ""}
+        zone["role"] = _rapl_zone_role(zone["name"], path)
         for key in (
             "energy_uj", "max_energy_range_uj", "power_uw", "enabled",
             "constraint_0_power_limit_uw", "constraint_0_time_window_us",
@@ -382,33 +496,38 @@ def collect_powercap(
             if os.path.isfile(fpath):
                 val = read_text(fpath)
                 zone[key] = int(val) if val and val.isdigit() else val
-        pw = _zone_power_w(zone, sample_energy=not live)
+        pw = _zone_power_w(
+            zone,
+            sample_energy=not live,
+            live=live,
+            rapl_state=rapl_state,
+        )
         if pw is not None:
             zone["power_w"] = pw
         plimit = zone.get("constraint_0_power_limit_uw")
         if isinstance(plimit, int) and plimit > 0:
             zone["plimit_w"] = round(plimit / 1_000_000, 1)
         zones.append(zone)
-        name_l = (zone.get("name") or "").lower()
-        if pw is not None and ("package" in name_l or "dram" in name_l or "core" in name_l or "psys" in name_l):
+        if pw is not None and zone["role"] != "other":
             rapl_breakdown.append({
                 "name": zone.get("name") or path,
+                "role": zone["role"],
                 "power_w": pw,
                 "plimit_w": zone.get("plimit_w"),
             })
+            if zone["role"] == "package" and package_watts is None:
+                package_watts = pw
+            elif zone["role"] == "psys" and psys_watts is None:
+                psys_watts = pw
 
-    package_watts = None
-    for z in zones:
-        if "package" in (z.get("name") or "").lower():
-            package_watts = z.get("power_w")
-            if package_watts is not None:
-                break
-    if package_watts is None and rapl_breakdown:
-        package_watts = rapl_breakdown[0].get("power_w")
+    if live and rapl_state is not None:
+        _save_rapl_state(rapl_state)
 
     sensor_power = (sensors_normalized or {}).get("power") or []
-    sensor_total = round(sum(p.get("value_w", 0) for p in sensor_power if isinstance(p.get("value_w"), (int, float))), 2)
-    rapl_measured = round(sum(r["power_w"] for r in rapl_breakdown if r.get("power_w") is not None), 2)
+    sensor_total = round(
+        sum(p.get("value_w", 0) for p in sensor_power if isinstance(p.get("value_w"), (int, float))),
+        2,
+    )
 
     cpu = cpu or {}
     estimate = estimate_system_power(
@@ -420,39 +539,23 @@ def collect_powercap(
         rapl_breakdown=rapl_breakdown,
     )
 
-    measured_parts = []
-    if rapl_measured > 0:
-        measured_parts.append(rapl_measured)
-    if sensor_total > 0 and sensor_total > rapl_measured * 0.5:
-        measured_parts.append(sensor_total)
-    measured_total = round(sum(measured_parts), 2) if measured_parts else None
-
-    if measured_total and measured_total > 10:
-        display_w = measured_total
-        method = "measured"
-        confidence = "medium" if len(rapl_breakdown) > 1 or sensor_total else "low"
-    else:
-        display_w = estimate["load_total_w"]
-        method = "estimated"
-        confidence = "low"
-
-    if measured_total and method == "measured":
-        # Add non-CPU estimate for rest of platform if RAPL is CPU-only
-        if rapl_measured and rapl_measured < estimate["load_total_w"] * 0.6:
-            display_w = round(rapl_measured + estimate["memory_w"] + estimate["storage_w"] + estimate["platform_w"], 1)
-            method = "hybrid"
-            confidence = "medium"
+    system_watts, method, confidence = _resolve_power_totals(
+        package_watts=package_watts,
+        psys_watts=psys_watts,
+        estimate=estimate,
+    )
+    rapl_measured = psys_watts if psys_watts is not None else package_watts
 
     return {
         "zones": zones,
         "package_watts": package_watts,
+        "psys_watts": psys_watts,
         "rapl_breakdown": rapl_breakdown,
-        "rapl_measured_w": rapl_measured or None,
+        "rapl_measured_w": rapl_measured,
         "sensor_power": sensor_power,
         "sensor_total_w": sensor_total or None,
-        "measured_total_w": measured_total,
         "estimate": estimate,
-        "system_watts": display_w,
+        "system_watts": system_watts,
         "method": method,
         "confidence": confidence,
     }
@@ -979,9 +1082,10 @@ def build_inventory(data: dict[str, Any]) -> list[dict[str, Any]]:
         ]
         if pwr.get("package_watts") is not None:
             rows.append(_row("CPU package", "RAPL", f"{pwr.get('package_watts')} W", "rapl"))
+        if pwr.get("psys_watts") is not None:
+            rows.append(_row("Platform (PSYS)", "RAPL", f"{pwr.get('psys_watts')} W", "rapl"))
         for item in (pwr.get("rapl_breakdown") or []):
-            n = (item.get("name") or "").lower()
-            if "package" in n:
+            if item.get("role") in ("package", "psys"):
                 continue
             if item.get("power_w") is not None:
                 rows.append(_row(item.get("name") or "RAPL zone", "RAPL", f"{item.get('power_w')} W", "rapl"))
@@ -1002,11 +1106,6 @@ def build_inventory(data: dict[str, Any]) -> list[dict[str, Any]]:
         sections.append({"id": "power", "title": "Power", "rows": rows})
     return sections
 
-
-
-CACHE_DIR = Path("/var/cache/pve-hw-dashboard")
-STATIC_CACHE = CACHE_DIR / "static.json"
-LIVE_SMART_INTERVAL = 30
 
 
 def save_static_cache(payload: dict[str, Any]) -> None:
