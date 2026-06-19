@@ -425,7 +425,12 @@ def _parse_tdp_w(cpu: dict[str, Any], processor_dmi: dict[str, str], system: dic
         if m:
             return float(m.group(1)), "dmi"
 
-    model = (system or {}).get("processor") or info_get("model name") or ""
+    model = (
+        (system or {}).get("processor")
+        or (processor_dmi or {}).get("Version")
+        or info_get("model name")
+        or ""
+    )
     m = re.search(r"(\d{2,3})\s*W", model, re.I)
     if m:
         return float(m.group(1)), "model name"
