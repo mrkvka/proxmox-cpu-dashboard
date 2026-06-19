@@ -465,8 +465,8 @@ def _parse_tdp_w(cpu: dict[str, Any], processor_dmi: dict[str, str], system: dic
     if not isinstance(mhz, int):
         mhz = 3000
     if mhz <= 3500 and physical <= 8:
-        return float(min(65, max(15, physical * 6)), "heuristic (mobile-class)")
-    return float(min(125, max(35, physical * 12)), "heuristic (desktop-class)")
+        return float(min(65, max(15, physical * 6))), "heuristic (mobile-class)"
+    return float(min(125, max(35, physical * 12))), "heuristic (desktop-class)"
 
 
 def _memory_size_gib(size_text: str) -> float:
