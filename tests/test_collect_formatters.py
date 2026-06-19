@@ -48,6 +48,30 @@ class FormatterTests(unittest.TestCase):
         self.assertEqual(mod._rapl_zone_role("psys", "/sys/class/powercap/intel-rapl:0:psys"), "psys")
         self.assertEqual(mod._rapl_zone_role("core", "/sys/class/powercap/intel-rapl:0:core"), "core")
 
+    def test_parse_tdp_amd_4800h(self):
+        tdp, source = mod._parse_tdp_w(
+            cpu={"per_cpu": [{"online": True, "topology": {"core_id": i // 2}} for i in range(16)]},
+            processor_dmi={},
+            system={"processor": "AMD Ryzen 7 4800H with Radeon Graphics"},
+        )
+        self.assertEqual(tdp, 45.0)
+        self.assertEqual(source, "amd model suffix")
+
+    def test_physical_core_count(self):
+        cpu = {
+            "per_cpu": [
+                {"online": True, "topology": {"core_id": 0}},
+                {"online": True, "topology": {"core_id": 0}},
+                {"online": True, "topology": {"core_id": 1}},
+                {"online": False, "topology": {"core_id": 2}},
+            ]
+        }
+        self.assertEqual(mod._physical_core_count(cpu), 2)
+        self.assertEqual(mod._rapl_zone_role("package-0", "/sys/class/powercap/intel-rapl:0"), "package")
+        self.assertEqual(mod._rapl_zone_role("", "/sys/class/powercap/amd-rapl"), "package")
+        self.assertEqual(mod._rapl_zone_role("psys", "/sys/class/powercap/intel-rapl:0:psys"), "psys")
+        self.assertEqual(mod._rapl_zone_role("core", "/sys/class/powercap/intel-rapl:0:core"), "core")
+
     def test_resolve_power_totals_no_double_count(self):
         est = {"memory_w": 11.2, "storage_w": 7.0, "platform_w": 25.0, "load_total_w": 180.0}
         system_w, method, _conf = mod._resolve_power_totals(

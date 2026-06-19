@@ -193,6 +193,7 @@ def collect_cpus() -> dict[str, Any]:
         "total": len(per_cpu),
         "online": len(online_ids),
         "offline": len(offline_ids),
+        "physical_cores": _physical_core_count({"per_cpu": per_cpu}),
         "online_ids": online_ids,
         "offline_ids": offline_ids,
         "per_cpu": per_cpu,
@@ -402,22 +403,70 @@ def _resolve_power_totals(
     return estimate.get("load_total_w"), "estimated", "low"
 
 
-def _parse_tdp_w(cpu: dict[str, Any], processor_dmi: dict[str, str], system: dict[str, Any]) -> float:
+def _physical_core_count(cpu: dict[str, Any]) -> int:
+    cores: set[int] = set()
+    for item in cpu.get("per_cpu") or []:
+        if not item.get("online"):
+            continue
+        topo = item.get("topology") or {}
+        core_id = topo.get("core_id")
+        if isinstance(core_id, int):
+            cores.add(core_id)
+    if cores:
+        return len(cores)
+    total = int(cpu.get("online") or cpu.get("total") or 1)
+    return max(1, total // 2) if total > 1 else total
+
+
+def _parse_tdp_w(cpu: dict[str, Any], processor_dmi: dict[str, str], system: dict[str, Any]) -> tuple[float, str]:
     for key in ("Max Power", "Maximum Power", "TDP"):
         val = (processor_dmi or {}).get(key, "")
         m = re.search(r"(\d+)\s*W", val, re.I)
         if m:
-            return float(m.group(1))
+            return float(m.group(1)), "dmi"
+
     model = (system or {}).get("processor") or info_get("model name") or ""
     m = re.search(r"(\d{2,3})\s*W", model, re.I)
     if m:
-        return float(m.group(1))
-    cores = int(cpu.get("online") or cpu.get("total") or 1)
-    freq = cpu.get("frequency") or {}
+        return float(m.group(1)), "model name"
+
+    amd_suffix_tdp = {
+        "u": 15, "ue": 15,
+        "hs": 35,
+        "h": 45, "hx": 45,
+        "g": 35, "ge": 35,
+        "x": 105, "xt": 105,
+        "f": 65,
+    }
+    amd = re.search(r"ryzen(?:\s+(?:threadripper|epyc|[\w+\-]+))?\s+(\d{4})([a-z]{1,3})?\b", model, re.I)
+    if amd:
+        suffix = (amd.group(2) or "").lower()
+        if suffix in amd_suffix_tdp:
+            return float(amd_suffix_tdp[suffix]), "amd model suffix"
+        if suffix:
+            return float(amd_suffix_tdp.get("h", 45)), "amd model suffix"
+
+    intel = re.search(r"\bi[3579]-(\d{4})([A-Z]{2,3})\b", model)
+    if intel:
+        suffix = intel.group(2).upper()
+        if suffix.endswith("U") or suffix.endswith("Y"):
+            return 15.0, "intel model suffix"
+        if suffix.endswith("H"):
+            return 45.0, "intel model suffix"
+        if suffix.endswith("HX"):
+            return 55.0, "intel model suffix"
+        if suffix.endswith("K") or suffix.endswith("KF"):
+            return 125.0, "intel model suffix"
+        return 65.0, "intel model suffix"
+
+    physical = _physical_core_count(cpu)
+    freq = (cpu.get("frequency") or {})
     mhz = freq.get("hw_max_mhz") or freq.get("max_mhz") or 3000
     if not isinstance(mhz, int):
         mhz = 3000
-    return float(min(280, max(35, cores * mhz / 1000 * 10)))
+    if mhz <= 3500 and physical <= 8:
+        return float(min(65, max(15, physical * 6)), "heuristic (mobile-class)")
+    return float(min(125, max(35, physical * 12)), "heuristic (desktop-class)")
 
 
 def _memory_size_gib(size_text: str) -> float:
@@ -438,7 +487,7 @@ def estimate_system_power(
     system: dict[str, Any],
     rapl_breakdown: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    tdp = _parse_tdp_w(cpu, processor_dmi, system)
+    tdp, tdp_source = _parse_tdp_w(cpu, processor_dmi, system)
     mem_gib = sum(_memory_size_gib(m.get("size", "")) for m in (memory_modules or []))
     memory_w = round(max(4.0, mem_gib * 0.35), 1)
     storage_w = 0.0
@@ -446,9 +495,9 @@ def estimate_system_power(
         storage_w += 7.0 if disk.get("rotational") == "1" else 3.5
     storage_w = round(storage_w, 1)
     platform_w = 25.0
-    cores = int(cpu.get("online") or cpu.get("total") or 1)
+    physical = _physical_core_count(cpu)
     load1 = float((system or {}).get("loadavg", [0.0])[0] or 0)
-    load_factor = min(1.0, load1 / max(cores, 1))
+    load_factor = min(1.0, load1 / max(physical, 1))
     cpu_idle_frac = 0.25
     cpu_at_load = round(tdp * (cpu_idle_frac + (1 - cpu_idle_frac) * load_factor), 1)
     plimit = None
@@ -458,10 +507,12 @@ def estimate_system_power(
             break
     return {
         "cpu_tdp_w": tdp,
+        "cpu_tdp_source": tdp_source,
         "cpu_plimit_w": plimit,
         "memory_w": memory_w,
         "storage_w": storage_w,
         "platform_w": platform_w,
+        "physical_cores": physical,
         "load_factor": round(load_factor, 2),
         "cpu_at_load_w": cpu_at_load,
         "idle_total_w": round(platform_w + memory_w + storage_w + tdp * cpu_idle_frac, 1),
@@ -1072,35 +1123,58 @@ def build_inventory(data: dict[str, Any]) -> list[dict[str, Any]]:
         est = pwr.get("estimate") or {}
         method = pwr.get("method") or "?"
         conf = pwr.get("confidence") or "?"
-        rows = [
-            _row(
+        package = pwr.get("package_watts")
+        rows = []
+
+        if package is not None:
+            rows.append(_row("CPU package", "RAPL measured", f"{package} W", "rapl"))
+        if pwr.get("psys_watts") is not None:
+            rows.append(_row("Platform (PSYS)", "RAPL measured", f"{pwr.get('psys_watts')} W", "rapl"))
+
+        if pwr.get("system_watts") is not None:
+            rows.append(_row(
                 "System total",
                 f"{method} ({conf})",
                 f"{pwr.get('system_watts')} W",
-                "rapl+est",
-            ),
-        ]
-        if pwr.get("package_watts") is not None:
-            rows.append(_row("CPU package", "RAPL", f"{pwr.get('package_watts')} W", "rapl"))
-        if pwr.get("psys_watts") is not None:
-            rows.append(_row("Platform (PSYS)", "RAPL", f"{pwr.get('psys_watts')} W", "rapl"))
+                "rapl+est" if method != "estimated" else "estimate",
+            ))
+
+        if method == "hybrid" and package is not None:
+            if est.get("memory_w"):
+                rows.append(_row("↳ Memory", "estimate", f"{est.get('memory_w')} W", "dmidecode"))
+            if est.get("storage_w"):
+                rows.append(_row("↳ Storage", "estimate", f"{est.get('storage_w')} W", "inventory"))
+            if est.get("platform_w"):
+                rows.append(_row("↳ Platform", "estimate", f"{est.get('platform_w')} W", "heuristic"))
+        elif method == "estimated":
+            if est.get("memory_w"):
+                rows.append(_row("Memory", "estimate", f"{est.get('memory_w')} W", "dmidecode"))
+            if est.get("storage_w"):
+                rows.append(_row("Storage", "estimate", f"{est.get('storage_w')} W", "inventory"))
+            if est.get("platform_w"):
+                rows.append(_row("Platform", "estimate", f"{est.get('platform_w')} W", "heuristic"))
+            if est.get("cpu_tdp_w"):
+                rows.append(_row(
+                    "CPU TDP",
+                    est.get("cpu_tdp_source") or "spec / DMI",
+                    f"{est.get('cpu_tdp_w')} W",
+                    "estimate",
+                ))
+            if est.get("cpu_at_load_w"):
+                rows.append(_row(
+                    "CPU @ load",
+                    f"load {est.get('load_factor')} / {est.get('physical_cores', '?')} cores",
+                    f"{est.get('cpu_at_load_w')} W",
+                    "estimate",
+                ))
+            if est.get("idle_total_w"):
+                rows.append(_row("Est. idle total", "heuristic", f"{est.get('idle_total_w')} W", "estimate"))
+
         for item in (pwr.get("rapl_breakdown") or []):
-            if item.get("role") in ("package", "psys"):
+            if item.get("role") in ("package", "psys", "core"):
                 continue
             if item.get("power_w") is not None:
                 rows.append(_row(item.get("name") or "RAPL zone", "RAPL", f"{item.get('power_w')} W", "rapl"))
-        if est.get("memory_w"):
-            rows.append(_row("Memory", "estimate", f"{est.get('memory_w')} W", "dmidecode"))
-        if est.get("storage_w"):
-            rows.append(_row("Storage", "estimate", f"{est.get('storage_w')} W", "inventory"))
-        if est.get("platform_w"):
-            rows.append(_row("Platform", "estimate", f"{est.get('platform_w')} W", "heuristic"))
-        if est.get("cpu_tdp_w"):
-            rows.append(_row("CPU TDP", "spec / DMI", f"{est.get('cpu_tdp_w')} W", "estimate"))
-        if est.get("cpu_at_load_w"):
-            rows.append(_row("CPU @ load", f"load {est.get('load_factor')}", f"{est.get('cpu_at_load_w')} W", "estimate"))
-        if est.get("idle_total_w"):
-            rows.append(_row("Est. idle total", "heuristic", f"{est.get('idle_total_w')} W", "estimate"))
         for sp in (pwr.get("sensor_power") or [])[:4]:
             rows.append(_row(sp.get("label") or "Sensor", "power", f"{sp.get('value_w')} W", "sensors"))
         sections.append({"id": "power", "title": "Power", "rows": rows})

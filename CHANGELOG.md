@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.5.5] — 2026-06-19
+
+### Fix — power estimates and UI clarity
+
+- Parse AMD/Intel model suffixes for TDP (e.g. Ryzen 4800H → 45 W, not 280 W)
+- Use physical core count for load factor, not logical CPU count
+- Power tab: show measured RAPL first; hide misleading TDP/heuristic rows when RAPL is available
+
 ## [3.5.4] — 2026-06-19
 
 ### Fix — CPU / system power
