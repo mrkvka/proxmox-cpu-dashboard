@@ -24,7 +24,29 @@ var PVECPUDash = (function() {
             '@keyframes pve-hw-flash-changed{0%{background-color:rgba(47,128,237,.45)}100%{background-color:transparent}}',
             '.pve-hw-table td.pve-hw-flash-up{animation:pve-hw-flash-up 1.4s ease-out}',
             '.pve-hw-table td.pve-hw-flash-down{animation:pve-hw-flash-down 1.4s ease-out}',
-            '.pve-hw-table td.pve-hw-flash-changed{animation:pve-hw-flash-changed 1.4s ease-out}','.pve-hw-about{font-size:10px;line-height:1.55;opacity:.85;padding:8px 12px 10px;border-top:1px solid rgba(128,128,128,.35)}','.pve-hw-about a{color:inherit;text-decoration:underline}','.pve-hw-about code{font-size:9px;opacity:.9}'
+            '.pve-hw-table td.pve-hw-flash-changed{animation:pve-hw-flash-changed 1.4s ease-out}','.pve-hw-about{font-size:10px;line-height:1.55;opacity:.85;padding:8px 12px 10px;border-top:1px solid rgba(128,128,128,.35)}','.pve-hw-about a{color:inherit;text-decoration:underline}','.pve-hw-about code{font-size:9px;opacity:.9}',
+            /* Guests dashboard */
+            '.pve-guests-strip-inner{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:11px}',
+            '.pve-guests-chip{padding:3px 8px;border:1px solid rgba(128,128,128,.35);border-radius:999px;background:rgba(128,128,128,.08)}',
+            '.pve-guests-chip b{margin-right:4px}',
+            '.pve-guests-grid .x-grid-cell-inner{padding:6px 8px}',
+            '.pve-guest-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:middle;background:#9ca3af}',
+            '.pve-guest-dot.ok{background:#22c55e;box-shadow:0 0 0 2px rgba(34,197,94,.25)}',
+            '.pve-guest-dot.off{background:#6b7280}',
+            '.pve-guest-name{font-weight:600}',
+            '.pve-guest-pill{display:inline-block;padding:1px 7px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.02em}',
+            '.pve-guest-pill.vm{background:rgba(59,130,246,.18);color:#60a5fa}',
+            '.pve-guest-pill.lxc{background:rgba(34,197,94,.16);color:#4ade80}',
+            '.pve-guest-bar{position:relative;height:16px;border-radius:4px;background:rgba(128,128,128,.18);overflow:hidden;min-width:90px}',
+            '.pve-guest-bar-fill{position:absolute;left:0;top:0;bottom:0;border-radius:4px}',
+            '.pve-guest-bar-fill.ok{background:linear-gradient(90deg,#16a34a,#22c55e)}',
+            '.pve-guest-bar-fill.warn{background:linear-gradient(90deg,#d97706,#f59e0b)}',
+            '.pve-guest-bar-fill.danger{background:linear-gradient(90deg,#dc2626,#ef4444)}',
+            '.pve-guest-bar-label{position:relative;z-index:1;display:block;padding:0 6px;font-size:10px;line-height:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+            '.pve-guest-muted{opacity:.55}',
+            '.pve-guest-rate{font-size:10px;line-height:1.25}',
+            '.pve-guest-rate .up{color:#22c55e}',
+            '.pve-guest-rate .down{color:#60a5fa}'
         ].join('');
         if (existing) {
             existing.textContent = css;
@@ -588,6 +610,160 @@ var PVECPUDash = (function() {
         }
     }
 
+    function formatBytes(n) {
+        n = Number(n) || 0;
+        if (n < 1024) return Math.round(n) + ' B';
+        var u = ['KiB', 'MiB', 'GiB', 'TiB'];
+        var i = -1;
+        do {
+            n /= 1024;
+            i++;
+        } while (n >= 1024 && i < u.length - 1);
+        return (n >= 10 || i === 0 ? n.toFixed(0) : n.toFixed(1)) + ' ' + u[i];
+    }
+
+    function formatUptime(sec) {
+        sec = Math.max(0, Math.floor(Number(sec) || 0));
+        if (!sec) return '0s';
+        var d = Math.floor(sec / 86400);
+        var h = Math.floor((sec % 86400) / 3600);
+        var m = Math.floor((sec % 3600) / 60);
+        if (d > 0) return d + 'd ' + h + 'h';
+        if (h > 0) return h + 'h ' + m + 'm';
+        return m + 'm';
+    }
+
+    function formatRate(bps) {
+        bps = Number(bps) || 0;
+        if (bps <= 0) return '0 B/s';
+        return formatBytes(bps) + '/s';
+    }
+
+    function barClass(pct) {
+        if (pct >= 85) return 'danger';
+        if (pct >= 70) return 'warn';
+        return 'ok';
+    }
+
+    function renderUsageBar(pct, opts) {
+        opts = opts || {};
+        pct = Math.max(0, Math.min(100, Number(pct) || 0));
+        var label = opts.label != null ? opts.label : (Math.round(pct) + '%');
+        return '<div class="pve-guest-bar" title="' + esc(label) + '">' +
+            '<div class="pve-guest-bar-fill ' + barClass(pct) + '" style="width:' + pct.toFixed(1) + '%"></div>' +
+            '<span class="pve-guest-bar-label">' + esc(label) + '</span></div>';
+    }
+
+    function renderGuestRate(rec, kind) {
+        var prev = (rec.store && rec.store._pvePrevRates) ? rec.store._pvePrevRates[rec.get('vmid')] : null;
+        var now = Date.now() / 1000;
+        var html;
+        if (kind === 'net') {
+            var nin = Number(rec.get('netin')) || 0;
+            var nout = Number(rec.get('netout')) || 0;
+            var rin = 0, rout = 0;
+            if (prev && prev.ts && now > prev.ts) {
+                var dt = now - prev.ts;
+                rin = Math.max(0, (nin - prev.netin) / dt);
+                rout = Math.max(0, (nout - prev.netout) / dt);
+            }
+            html = '<div class="pve-guest-rate"><span class="down">↓ ' + esc(formatRate(rin)) +
+                '</span><br><span class="up">↑ ' + esc(formatRate(rout)) + '</span></div>';
+        } else {
+            var dr = Number(rec.get('diskread')) || 0;
+            var dw = Number(rec.get('diskwrite')) || 0;
+            var rr = 0, rw = 0;
+            if (prev && prev.ts && now > prev.ts) {
+                var dtd = now - prev.ts;
+                rr = Math.max(0, (dr - prev.diskread) / dtd);
+                rw = Math.max(0, (dw - prev.diskwrite) / dtd);
+            }
+            html = '<div class="pve-guest-rate"><span class="down">R ' + esc(formatRate(rr)) +
+                '</span><br><span class="up">W ' + esc(formatRate(rw)) + '</span></div>';
+        }
+        return html;
+    }
+
+    function rememberGuestRates(store, guests) {
+        if (!store) return;
+        var prev = store._pvePrevRates || {};
+        var next = {};
+        var now = Date.now() / 1000;
+        (guests || []).forEach(function(g) {
+            var id = g.vmid;
+            next[id] = {
+                ts: now,
+                netin: Number(g.netin) || 0,
+                netout: Number(g.netout) || 0,
+                diskread: Number(g.diskread) || 0,
+                diskwrite: Number(g.diskwrite) || 0
+            };
+            if (prev[id]) {
+                /* keep previous snapshot available for this render cycle */
+                next[id]._prev = prev[id];
+            }
+        });
+        /* For renderers, expose previous values keyed by current */
+        var forRender = {};
+        Object.keys(next).forEach(function(id) {
+            forRender[id] = next[id]._prev || null;
+        });
+        store._pvePrevRates = forRender;
+        store._pveNextRates = next;
+        /* After render, promote next -> prev */
+        Ext.defer(function() {
+            var promoted = {};
+            Object.keys(store._pveNextRates || {}).forEach(function(id) {
+                var n = store._pveNextRates[id];
+                promoted[id] = { ts: n.ts, netin: n.netin, netout: n.netout, diskread: n.diskread, diskwrite: n.diskwrite };
+            });
+            store._pvePrevRates = promoted;
+        }, 50);
+    }
+
+    function openGuest(type, vmid) {
+        var id = (type === 'lxc' ? 'lxc/' : 'qemu/') + vmid;
+        try {
+            var ws = Ext.ComponentQuery.query('proxmoxStdWorkspace')[0];
+            if (ws && Ext.isFunction(ws.selectById)) {
+                ws.selectById(id);
+                return;
+            }
+        } catch (e1) {}
+        try {
+            var tree = Ext.ComponentQuery.query('pveResourceTree')[0];
+            if (tree && tree.select) {
+                tree.select(id);
+                return;
+            }
+        } catch (e2) {}
+        try {
+            window.location.hash = encodeURIComponent(id);
+        } catch (e3) {}
+    }
+
+    function fetchGuests(panel, cb) {
+        var node = panel.pveSelNode.data.node;
+        Proxmox.Utils.API2Request({
+            url: '/nodes/' + encodeURIComponent(node) + '/hwguests',
+            method: 'GET',
+            success: function(resp) {
+                var data = (resp.result && resp.result.data) ? resp.result.data : (resp.result || {});
+                var grid = panel.down('#pveGuestsGrid');
+                if (grid) {
+                    rememberGuestRates(grid.getStore(), data.guests || []);
+                }
+                if (cb) cb(data);
+            },
+            failure: function(r) {
+                if (cb) cb(panel._guestData || { guests: [], summary: {}, node: {} });
+                if (!panel._guestLoaded) {
+                    Ext.Msg.alert(gettext('Error'), (r && r.htmlStatus) || gettext('Failed to load guests'));
+                }
+            }
+        });
+    }
+
     return {
         ensureStyle: ensureStyle,
         parseState: parseState,
@@ -595,6 +771,7 @@ var PVECPUDash = (function() {
         renderInventory: renderInventory,
         fetchFull: fetchFull,
         fetchLive: fetchLive,
+        fetchGuests: fetchGuests,
         startLivePoll: startLivePoll,
         stopLivePoll: stopLivePoll,
         syncControls: syncControls,
@@ -610,6 +787,12 @@ var PVECPUDash = (function() {
         saveScroll: saveScroll,
         restoreScroll: restoreScroll,
         updateAbout: updateAbout,
-        renderAboutHtml: renderAboutHtml
+        renderAboutHtml: renderAboutHtml,
+        formatBytes: formatBytes,
+        formatUptime: formatUptime,
+        formatRate: formatRate,
+        renderUsageBar: renderUsageBar,
+        renderGuestRate: renderGuestRate,
+        openGuest: openGuest
     };
 })();

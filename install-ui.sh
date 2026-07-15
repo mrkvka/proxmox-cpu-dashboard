@@ -36,7 +36,7 @@ if [[ -f "$API_SHARE/VERSION" ]]; then
     fi
 fi
 
-for f in pve_hw_core.js pve_hw_tab.js pve_hw_plugin.js; do
+for f in pve_hw_core.js pve_hw_tab.js pve_hw_guests.js pve_hw_plugin.js; do
     if [[ ! -f "$UI_SRC/$f" ]]; then
         echo "ERROR: missing $UI_SRC/$f"
         exit 1
@@ -58,13 +58,14 @@ install -d "$SHARE_UI" "$SHARE_UI/ui"
 install -m 644 "$SCRIPT_DIR/VERSION" "$SHARE_UI/VERSION"
 install -m 644 "$UI_SRC/pve_hw_core.js" "$SHARE_UI/ui/pve_hw_core.js"
 install -m 644 "$UI_SRC/pve_hw_tab.js" "$SHARE_UI/ui/pve_hw_tab.js"
+install -m 644 "$UI_SRC/pve_hw_guests.js" "$SHARE_UI/ui/pve_hw_guests.js"
 install -m 644 "$UI_SRC/pve_hw_plugin.js" "$SHARE_UI/ui/pve_hw_plugin.js"
 install -m 644 "$BUILD_JS" "$SHARE_UI/pve_hw_build_info.js"
 install -m 755 "$SCRIPT_DIR/install-ui.sh" "$SHARE_UI/install-ui.sh"
 install -m 755 "$SCRIPT_DIR/uninstall-ui.sh" "$SHARE_UI/uninstall-ui.sh"
 
 # Strip script tags (legacy + current), then deploy /pve2/js/ files
-ALL_UI_SCRIPTS=(pve_node_summary.js pve_node_hardware.js pve_hw_core.js pve_hw_tab.js pve_hw_plugin.js pve_hw_build_info.js)
+ALL_UI_SCRIPTS=(pve_node_summary.js pve_node_hardware.js pve_hw_core.js pve_hw_tab.js pve_hw_guests.js pve_hw_plugin.js pve_hw_build_info.js)
 for f in "${ALL_UI_SCRIPTS[@]}"; do
     sed -i "\\|/pve2/js/${f}|d" "$INDEX_TPL"
     rm -f "$MGR_JS/$f"
@@ -72,6 +73,7 @@ done
 
 install -m 644 "$UI_SRC/pve_hw_core.js" "$MGR_JS/pve_hw_core.js"
 install -m 644 "$UI_SRC/pve_hw_tab.js" "$MGR_JS/pve_hw_tab.js"
+install -m 644 "$UI_SRC/pve_hw_guests.js" "$MGR_JS/pve_hw_guests.js"
 install -m 644 "$UI_SRC/pve_hw_plugin.js" "$MGR_JS/pve_hw_plugin.js"
 install -m 644 "$BUILD_JS" "$MGR_JS/pve_hw_build_info.js"
 
@@ -90,10 +92,12 @@ inject_after() {
 
 inject_after "pve2/js/pvemanagerlib.js" pve_hw_core.js
 inject_after "pve2/js/pve_hw_core.js" pve_hw_tab.js
-inject_after "pve2/js/pve_hw_tab.js" pve_hw_plugin.js
+inject_after "pve2/js/pve_hw_tab.js" pve_hw_guests.js
+inject_after "pve2/js/pve_hw_guests.js" pve_hw_plugin.js
 inject_after "pve2/js/pve_hw_plugin.js" pve_hw_build_info.js
 grep -q pve_hw_core.js "$INDEX_TPL"
 grep -q pve_hw_tab.js "$INDEX_TPL"
+grep -q pve_hw_guests.js "$INDEX_TPL"
 grep -q pve_hw_plugin.js "$INDEX_TPL"
 grep -q pve_hw_build_info.js "$INDEX_TPL"
 
@@ -103,6 +107,6 @@ systemctl restart pveproxy
 bash "$SCRIPT_DIR/scripts/verify-ui.sh"
 
 echo ""
-echo " UI installed. Node → Hardware tab, then Ctrl+Shift+R"
-echo " Load order: core → tab → plugin → build_info (see docs/PLUGIN.md)"
+echo " UI installed. Node → Hardware / Guests tabs, then Ctrl+Shift+R"
+echo " Load order: core → tab → guests → plugin → build_info (see docs/PLUGIN.md)"
 echo ""

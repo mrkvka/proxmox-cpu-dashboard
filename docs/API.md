@@ -19,7 +19,7 @@ Permissions:
 
 | Endpoint group | PVE permission |
 |----------------|----------------|
-| `GET /hw`, `GET /hwlive` | `Sys.Audit` on `/nodes/{node}` |
+| `GET /hw`, `GET /hwlive`, `GET /hwguests` | `Sys.Audit` on `/nodes/{node}` |
 | `POST /hw*` | `Sys.Modify` on `/nodes/{node}` |
 
 ## Endpoints
@@ -47,6 +47,31 @@ Lightweight snapshot for polling (live fields + cached static data).
 ```bash
 pvesh get /nodes/$NODE/hwlive
 ```
+
+### `GET /hwlive`
+
+Live hardware snapshot for UI polling (fast path with cached static fields).
+
+```bash
+pvesh get /nodes/$NODE/hwlive
+```
+
+### `GET /hwguests`
+
+Unified VM + LXC list for the Guests dashboard tab (Pulse-style). Built from Proxmox `vmstatus` (same source as the resource tree), not from the hardware collector.
+
+```bash
+pvesh get /nodes/$NODE/hwguests
+```
+
+Response:
+
+| Field | Description |
+|-------|-------------|
+| `meta` | `version`, `collected_at`, `mode=guests` |
+| `node` | Host strip: `mem`, `maxmem`, `memavailable`, `uptime`, `loadavg`, `cpus`, `cpu_cores` |
+| `summary` | `total`, `running`, `stopped`, `vms`, `cts` |
+| `guests[]` | Per guest: `vmid`, `type` (`qemu`/`lxc`), `name`, `status`, `cpu`, `cpus`, `mem`, `maxmem`, `disk`, `maxdisk`, `uptime`, `netin`/`netout`, `diskread`/`diskwrite` |
 
 ### `POST /hwapply`
 
@@ -99,7 +124,7 @@ For debugging on the host:
 
 - **HTTPS** — use the same host/port as the Proxmox UI.
 - **CSRF** — browser UI uses `Proxmox.Utils.API2Request`; external apps use API tokens (no CSRF).
-- **Rate** — prefer `hwlive` for periodic polling (1–5 s), `hw` for full refresh.
+- **Rate** — prefer `hwlive` / `hwguests` for periodic polling (1–5 s), `hw` for full refresh.
 - Third-party automation (Home Assistant, scripts, monitoring) should call these endpoints only — not a separate HTTP service.
 
 ## Upgrade

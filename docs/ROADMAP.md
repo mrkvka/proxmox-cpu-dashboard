@@ -17,6 +17,7 @@
 - **Optional Summary strip** — color-coded thermals on Summary without full StatusView override
 - **GPU power** — estimate from `lspci` where no sensor exists
 - **HA integration** — separate repo; consume `docs/API.md` only
+- **Guests cluster view** — multi-node Pulse-like overview (node Guests tab ships in 3.6.0)
 
 ## Out of scope
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.6.0] — 2026-07-15
+
+### Guests dashboard tab
+
+- New node tab **Guests** (Pulse-style): VM/LXC table with CPU/MEM/DISK bars, uptime, live net/IO rates
+- `GET /nodes/{node}/hwguests` — unified guest list from `PVE::QemuServer::vmstatus` + `PVE::LXC::vmstatus` plus node strip (load/RAM/uptime)
+- Filters: type (All/VM/LXC), status (All/Running/Stopped), name/ID search
+- Double-click a guest to open the stock Proxmox guest view
+
 ## [3.5.5] — 2026-06-19
 
 ### Fix — power estimates and UI clarity
