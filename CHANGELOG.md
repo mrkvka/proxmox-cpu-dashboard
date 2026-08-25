@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.6.1] — 2026-08-25
+
+### CPU load in Hardware + Guests
+
+- Группа **CPU**: строки **Load average** (1/5/15) и **Utilization** (% busy из `/proc/stat`)
+- Вкладка **Guests**: chip **CPU %** в верхней полоске узла
+- Кэш `/var/cache/pve-hw-dashboard/cpu_stat.json` для live-опросов (общий для collector и `/hwguests`)
+
 ## [3.6.0] — 2026-07-15
 
 ### Guests dashboard tab

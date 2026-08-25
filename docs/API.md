@@ -69,7 +69,7 @@ Response:
 | Field | Description |
 |-------|-------------|
 | `meta` | `version`, `collected_at`, `mode=guests` |
-| `node` | Host strip: `mem`, `maxmem`, `memavailable`, `uptime`, `loadavg`, `cpus`, `cpu_cores` |
+| `node` | Host strip: `mem`, `maxmem`, `memavailable`, `uptime`, `loadavg`, `cpu_pct`, `cpus`, `cpu_cores` |
 | `summary` | `total`, `running`, `stopped`, `vms`, `cts` |
 | `guests[]` | Per guest: `vmid`, `type` (`qemu`/`lxc`), `name`, `status`, `cpu`, `cpus`, `mem`, `maxmem`, `disk`, `maxdisk`, `uptime`, `netin`/`netout`, `diskread`/`diskwrite` |
 

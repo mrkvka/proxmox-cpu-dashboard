@@ -39,9 +39,12 @@ VERSION = package_version()
 CACHE_DIR = Path("/var/cache/pve-hw-dashboard")
 STATIC_CACHE = CACHE_DIR / "static.json"
 RAPL_STATE_CACHE = CACHE_DIR / "rapl_state.json"
+CPU_STAT_CACHE = CACHE_DIR / "cpu_stat.json"
 LIVE_SMART_INTERVAL = 30
 RAPL_MIN_DELTA_S = 0.5
 RAPL_MAX_STALE_S = 180
+CPU_STAT_MIN_DELTA_S = 0.2
+CPU_STAT_MAX_STALE_S = 180
 
 
 def read_text(path: str) -> str | None:
@@ -74,6 +77,95 @@ def read_float(path: str) -> float | None:
 
 def mhz(khz: int | None) -> int | None:
     return round(khz / 1000) if isinstance(khz, int) and khz > 0 else None
+
+
+def _read_proc_stat_cpu() -> tuple[int, int] | None:
+    """Return (idle_all, total) jiffies from the aggregate cpu line in /proc/stat."""
+    text = read_text("/proc/stat")
+    if not text:
+        return None
+    for line in text.splitlines():
+        if not line.startswith("cpu "):
+            continue
+        parts = line.split()
+        # cpu user nice system idle iowait irq softirq steal guest guest_nice
+        if len(parts) < 5:
+            return None
+        try:
+            values = [int(x) for x in parts[1:11]]
+        except ValueError:
+            return None
+        while len(values) < 10:
+            values.append(0)
+        user, nice, system, idle, iowait, irq, softirq, steal, _guest, _gnice = values
+        idle_all = idle + iowait
+        total = user + nice + system + idle_all + irq + softirq + steal
+        return idle_all, total
+    return None
+
+
+def _load_cpu_stat_cache() -> dict[str, Any]:
+    try:
+        if CPU_STAT_CACHE.is_file():
+            data = json.loads(CPU_STAT_CACHE.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {}
+
+
+def _save_cpu_stat_cache(idle: int, total: int, ts: float) -> None:
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        CPU_STAT_CACHE.write_text(
+            json.dumps({"idle": idle, "total": total, "ts": ts}),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
+def cpu_utilization_pct(*, sample: bool = False) -> float | None:
+    """Host CPU utilization percent from /proc/stat deltas.
+
+    live/cached path: compare with previous sample in cpu_stat.json.
+    sample=True: take two readings ~0.12s apart (full snapshots).
+    """
+    now_stat = _read_proc_stat_cpu()
+    if now_stat is None:
+        return None
+    idle2, total2 = now_stat
+    now = time.time()
+
+    if sample:
+        time.sleep(0.12)
+        again = _read_proc_stat_cpu()
+        if again is None:
+            return None
+        idle1, total1 = idle2, total2
+        idle2, total2 = again
+        ts_delta = 0.12
+        _save_cpu_stat_cache(idle2, total2, time.time())
+    else:
+        prev = _load_cpu_stat_cache()
+        _save_cpu_stat_cache(idle2, total2, now)
+        if not isinstance(prev.get("idle"), (int, float)) or not isinstance(prev.get("total"), (int, float)):
+            return None
+        if not isinstance(prev.get("ts"), (int, float)):
+            return None
+        ts_delta = now - float(prev["ts"])
+        if ts_delta < CPU_STAT_MIN_DELTA_S or ts_delta > CPU_STAT_MAX_STALE_S:
+            return None
+        idle1 = int(prev["idle"])
+        total1 = int(prev["total"])
+
+    d_total = total2 - total1
+    d_idle = idle2 - idle1
+    if d_total <= 0:
+        return None
+    busy = max(0.0, min(100.0, (1.0 - (d_idle / d_total)) * 100.0))
+    return round(busy, 1)
 
 
 def parse_words(text: str | None) -> list[str]:
@@ -1025,6 +1117,22 @@ def build_inventory(data: dict[str, Any]) -> list[dict[str, Any]]:
             _row("Model", model, model, "lscpu"),
             _row("Architecture", lscpu.get("architecture"), lscpu.get("architecture"), "lscpu"),
             _row("Logical CPUs", cpu.get("total"), f"{cpu.get('online', '?')} online", "sysfs"),
+            _row(
+                "Load average",
+                f"{cpu.get('online') or cpu.get('total') or '?'} CPUs",
+                (
+                    f"{sysinfo['loadavg'][0]:.2f} / {sysinfo['loadavg'][1]:.2f} / {sysinfo['loadavg'][2]:.2f}"
+                    if isinstance(sysinfo.get("loadavg"), list) and len(sysinfo["loadavg"]) >= 3
+                    else "—"
+                ),
+                "proc",
+            ),
+            _row(
+                "Utilization",
+                "busy / total",
+                f"{sysinfo['cpu_pct']:.1f} %" if isinstance(sysinfo.get("cpu_pct"), (int, float)) else "—",
+                "proc",
+            ),
             _row("Governor", govs or "—", freq.get("governor"), "sysfs"),
             _row("Frequency", freq_avail, f"{freq.get('current_mhz', '?')} MHz", "sysfs"),
             _row("Scaling max", _mhz_range(freq.get("min_mhz"), freq.get("max_mhz")), f"{freq.get('max_mhz', '?')} MHz", "sysfs"),
@@ -1253,6 +1361,7 @@ def collect_system_live() -> dict[str, Any]:
         "hostname": socket.gethostname(),
         "kernel": platform.release(),
         "loadavg": [load1, load5, load15],
+        "cpu_pct": cpu_utilization_pct(sample=False),
         "uptime_seconds": int(uptime) if uptime else None,
     }
 
@@ -1361,6 +1470,7 @@ def collect_system() -> dict[str, Any]:
         "machine": platform.machine(),
         "processor": platform.processor() or info_get("model name"),
         "loadavg": [load1, load5, load15],
+        "cpu_pct": cpu_utilization_pct(sample=True),
         "uptime_seconds": int(uptime) if uptime else None,
         "pveversion": run_command_text(["pveversion"]),
     }

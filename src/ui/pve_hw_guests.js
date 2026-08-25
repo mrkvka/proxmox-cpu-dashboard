@@ -249,11 +249,14 @@ Ext.define('PVE.node.GuestsView', {
         var sum = (data && data.summary) || {};
         var memPct = node.maxmem ? Math.round((node.mem / node.maxmem) * 100) : 0;
         var load = (node.loadavg && node.loadavg[0] != null) ? Number(node.loadavg[0]).toFixed(2) : '—';
+        var cpuPct = (node.cpu_pct != null && node.cpu_pct !== '') ? Number(node.cpu_pct).toFixed(1) : null;
         var html = [
             '<div class="pve-guests-strip-inner">',
             '<span class="pve-guests-chip"><b>' + Ext.String.htmlEncode(gettext('Guests')) + '</b> ' +
                 (sum.running || 0) + '/' + (sum.total || 0) + ' ' + Ext.String.htmlEncode(gettext('running')) + '</span>',
             '<span class="pve-guests-chip">VM ' + (sum.vms || 0) + ' · LXC ' + (sum.cts || 0) + '</span>',
+            '<span class="pve-guests-chip">CPU ' +
+                Ext.String.htmlEncode(cpuPct != null ? (cpuPct + '%') : '—') + '</span>',
             '<span class="pve-guests-chip">Load ' + Ext.String.htmlEncode(String(load)) +
                 (node.cpus ? ' / ' + node.cpus + ' CPU' : '') + '</span>',
             '<span class="pve-guests-chip">RAM ' + memPct + '% (' +

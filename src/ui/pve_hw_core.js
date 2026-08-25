@@ -79,6 +79,21 @@ var PVECPUDash = (function() {
     function rowClass(param, applied) {
         var p = String(param).toLowerCase();
         var c = String(applied);
+        if (p.indexOf('utilization') >= 0) {
+            var u = parseFloat(c);
+            if (u >= 85) return 'pve-hw-row-danger';
+            if (u >= 70) return 'pve-hw-row-warn';
+        }
+        if (p.indexOf('load average') >= 0 || p === 'load') {
+            var parts = c.split('/');
+            if (parts.length >= 1) {
+                var load1 = parseFloat(parts[0]);
+                if (!isNaN(load1)) {
+                    if (load1 >= 16) return 'pve-hw-row-danger';
+                    if (load1 >= 8) return 'pve-hw-row-warn';
+                }
+            }
+        }
         if (p.indexOf('temperature') >= 0 || p.indexOf('temp') >= 0) {
             var n = parseFloat(c);
             if (n >= 80) return 'pve-hw-row-danger';
@@ -90,8 +105,8 @@ var PVECPUDash = (function() {
             if (w >= 50) return 'pve-hw-row-warn';
         }
         if (p.indexOf('online') >= 0 && c.indexOf('/') >= 0) {
-            var parts = c.split('/');
-            if (parts.length === 2 && parseInt(parts[0], 10) < parseInt(parts[1], 10)) {
+            var onlineParts = c.split('/');
+            if (onlineParts.length === 2 && parseInt(onlineParts[0], 10) < parseInt(onlineParts[1], 10)) {
                 return 'pve-hw-row-warn';
             }
         }
