@@ -1090,6 +1090,80 @@ def _parse_io_scheduler(raw: str | None) -> tuple[str, str]:
     return available, applied
 
 
+def _extract_cpu_tctl(sensors: dict[str, Any] | None) -> float | None:
+    """Prefer AMD Tctl / Intel Package temp from normalized sensors."""
+    temps = ((sensors or {}).get("normalized") or {}).get("temperatures") or []
+    preferred = ("tctl", "tdie", "package id 0", "package", "cpu")
+    for want in preferred:
+        for t in temps:
+            label = str(t.get("label") or "").lower()
+            if want in label and isinstance(t.get("value_c"), (int, float)):
+                return float(t["value_c"])
+    for t in temps:
+        chip = str(t.get("chip") or "").lower()
+        if ("k10temp" in chip or "coretemp" in chip) and isinstance(t.get("value_c"), (int, float)):
+            return float(t["value_c"])
+    return None
+
+
+def assess_thermal_state(
+    *,
+    tctl_c: float | None,
+    cpu_pct: float | None,
+    current_mhz: int | None,
+    max_mhz: int | None,
+    package_watts: float | None = None,
+) -> dict[str, Any]:
+    """Heuristic thermal/power limit status for inventory (no Intel-only counters required)."""
+    reasons: list[str] = []
+    level = "ok"  # ok | warm | pressure | throttle
+
+    if isinstance(tctl_c, (int, float)):
+        if tctl_c >= 95:
+            level = "throttle"
+            reasons.append(f"Tctl {tctl_c:.0f}°C ≥ 95°C — термолимит, CPU режет частоту")
+        elif tctl_c >= 90:
+            level = "pressure"
+            reasons.append(f"Tctl {tctl_c:.0f}°C ≥ 90°C — близко к термолимиту")
+        elif tctl_c >= 85:
+            level = "warm"
+            reasons.append(f"Tctl {tctl_c:.0f}°C — тепло под нагрузкой")
+
+    freq_clipped = False
+    if (
+        isinstance(cpu_pct, (int, float))
+        and cpu_pct >= 70
+        and isinstance(current_mhz, int)
+        and isinstance(max_mhz, int)
+        and max_mhz > 0
+        and current_mhz < max_mhz * 0.80
+    ):
+        freq_clipped = True
+        msg = f"частота {current_mhz} МГц при нагрузке {cpu_pct:.0f}% (max {max_mhz} МГц)"
+        if level in ("ok", "warm"):
+            level = "pressure"
+        reasons.append(msg)
+
+    if isinstance(package_watts, (int, float)) and package_watts > 0:
+        # informational only unless already throttling
+        if level == "throttle":
+            reasons.append(f"package {package_watts:.0f} W")
+
+    labels = {
+        "ok": "OK — без троттлинга",
+        "warm": "Тепло — следить",
+        "pressure": "Давление — возможен лимит",
+        "throttle": "ТРОТТЛИНГ — термолимит",
+    }
+    return {
+        "level": level,
+        "label": labels[level],
+        "detail": "; ".join(reasons) if reasons else "температура и частота в норме",
+        "tctl_c": tctl_c,
+        "freq_clipped": freq_clipped,
+    }
+
+
 def _mhz_range(lo: Any, hi: Any, suffix: str = "MHz") -> str:
     if lo is None and hi is None:
         return "—"
@@ -1110,36 +1184,65 @@ def build_inventory(data: dict[str, Any]) -> list[dict[str, Any]]:
     else:
         freq_avail = _mhz_range(freq.get("hw_min_mhz"), freq.get("hw_max_mhz"), "MHz (HW)")
 
-    sections.append({
-        "id": "cpu",
-        "title": "CPU",
-        "rows": [
-            _row("Model", model, model, "lscpu"),
-            _row("Architecture", lscpu.get("architecture"), lscpu.get("architecture"), "lscpu"),
-            _row("Logical CPUs", cpu.get("total"), f"{cpu.get('online', '?')} online", "sysfs"),
-            _row(
-                "Load average",
-                f"{cpu.get('online') or cpu.get('total') or '?'} CPUs",
-                (
-                    f"{sysinfo['loadavg'][0]:.2f} / {sysinfo['loadavg'][1]:.2f} / {sysinfo['loadavg'][2]:.2f}"
-                    if isinstance(sysinfo.get("loadavg"), list) and len(sysinfo["loadavg"]) >= 3
-                    else "—"
-                ),
-                "proc",
+    tctl = _extract_cpu_tctl(data.get("sensors"))
+    package_w = (data.get("power") or {}).get("package_watts")
+    thermal = assess_thermal_state(
+        tctl_c=tctl,
+        cpu_pct=sysinfo.get("cpu_pct") if isinstance(sysinfo.get("cpu_pct"), (int, float)) else None,
+        current_mhz=freq.get("current_mhz") if isinstance(freq.get("current_mhz"), int) else None,
+        max_mhz=(
+            freq.get("max_mhz")
+            if isinstance(freq.get("max_mhz"), int)
+            else (freq.get("hw_max_mhz") if isinstance(freq.get("hw_max_mhz"), int) else None)
+        ),
+        package_watts=package_w if isinstance(package_w, (int, float)) else None,
+    )
+
+    cpu_rows = [
+        _row("Model", model, model, "lscpu"),
+        _row("Architecture", lscpu.get("architecture"), lscpu.get("architecture"), "lscpu"),
+        _row("Logical CPUs", cpu.get("total"), f"{cpu.get('online', '?')} online", "sysfs"),
+        _row(
+            "Load average",
+            f"{cpu.get('online') or cpu.get('total') or '?'} CPUs",
+            (
+                f"{sysinfo['loadavg'][0]:.2f} / {sysinfo['loadavg'][1]:.2f} / {sysinfo['loadavg'][2]:.2f}"
+                if isinstance(sysinfo.get("loadavg"), list) and len(sysinfo["loadavg"]) >= 3
+                else "—"
             ),
-            _row(
-                "Utilization",
-                "busy / total",
-                f"{sysinfo['cpu_pct']:.1f} %" if isinstance(sysinfo.get("cpu_pct"), (int, float)) else "—",
-                "proc",
-            ),
-            _row("Governor", govs or "—", freq.get("governor"), "sysfs"),
-            _row("Frequency", freq_avail, f"{freq.get('current_mhz', '?')} MHz", "sysfs"),
-            _row("Scaling max", _mhz_range(freq.get("min_mhz"), freq.get("max_mhz")), f"{freq.get('max_mhz', '?')} MHz", "sysfs"),
-            _row("HW limits", _mhz_range(freq.get("hw_min_mhz"), freq.get("hw_max_mhz")), f"{freq.get('current_mhz', '?')} MHz (now)", "sysfs"),
-            _row("Driver", freq.get("driver"), freq.get("driver"), "sysfs"),
-        ],
-    })
+            "proc",
+        ),
+        _row(
+            "Utilization",
+            "busy / total",
+            f"{sysinfo['cpu_pct']:.1f} %" if isinstance(sysinfo.get("cpu_pct"), (int, float)) else "—",
+            "proc",
+        ),
+        _row(
+            "Tctl",
+            "CPU die (sensors)",
+            f"{tctl:.1f} °C" if isinstance(tctl, (int, float)) else "—",
+            "sensors",
+        ),
+        _row(
+            "Package power",
+            "RAPL",
+            f"{package_w:.1f} W" if isinstance(package_w, (int, float)) else "—",
+            "rapl",
+        ),
+        _row(
+            "Thermal status",
+            thermal["detail"],
+            thermal["label"],
+            "heuristic",
+        ),
+        _row("Governor", govs or "—", freq.get("governor"), "sysfs"),
+        _row("Frequency", freq_avail, f"{freq.get('current_mhz', '?')} MHz", "sysfs"),
+        _row("Scaling max", _mhz_range(freq.get("min_mhz"), freq.get("max_mhz")), f"{freq.get('max_mhz', '?')} MHz", "sysfs"),
+        _row("HW limits", _mhz_range(freq.get("hw_min_mhz"), freq.get("hw_max_mhz")), f"{freq.get('current_mhz', '?')} MHz (now)", "sysfs"),
+        _row("Driver", freq.get("driver"), freq.get("driver"), "sysfs"),
+    ]
+    sections.append({"id": "cpu", "title": "CPU", "rows": cpu_rows})
 
     mem = data.get("memory") or {}
     total_gib = round((mem.get("MemTotal") or 0) / 1024 / 1024, 1)

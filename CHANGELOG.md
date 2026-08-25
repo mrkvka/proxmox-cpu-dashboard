@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.6.2] — 2026-08-25
+
+### Thermal / throttle status in CPU
+
+- В группе **CPU**: **Tctl**, **Package power**, **Thermal status** (OK / тепло / давление / ТРОТТЛИНГ)
+- Статус по Tctl (≥90 / ≥95) и по «высокая нагрузка + частота ниже max»
+- Подсветка warn/danger в UI для Tctl и Thermal status
+
 ## [3.6.1] — 2026-08-25
 
 ### CPU load in Hardware + Guests

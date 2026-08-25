@@ -79,6 +79,22 @@ var PVECPUDash = (function() {
     function rowClass(param, applied) {
         var p = String(param).toLowerCase();
         var c = String(applied);
+        if (p.indexOf('thermal status') >= 0 || p.indexOf('throttle') >= 0) {
+            if (c.indexOf('ТРОТТЛИНГ') >= 0 || c.toLowerCase().indexOf('throttle') >= 0) {
+                return 'pve-hw-row-danger';
+            }
+            if (c.indexOf('Давление') >= 0 || c.toLowerCase().indexOf('pressure') >= 0) {
+                return 'pve-hw-row-warn';
+            }
+            if (c.indexOf('Тепло') >= 0 || c.toLowerCase().indexOf('warm') >= 0) {
+                return 'pve-hw-row-warn';
+            }
+        }
+        if (p === 'tctl' || p.indexOf('tctl') >= 0) {
+            var t = parseFloat(c);
+            if (t >= 95) return 'pve-hw-row-danger';
+            if (t >= 85) return 'pve-hw-row-warn';
+        }
         if (p.indexOf('utilization') >= 0) {
             var u = parseFloat(c);
             if (u >= 85) return 'pve-hw-row-danger';

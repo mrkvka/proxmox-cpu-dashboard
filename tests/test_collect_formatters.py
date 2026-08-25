@@ -90,7 +90,29 @@ class FormatterTests(unittest.TestCase):
         self.assertEqual(method, "measured")
         self.assertEqual(system_w, 140.0)
 
-    def test_energy_delta_w_wrap(self):
+    def test_assess_thermal_throttle(self):
+        hot = mod.assess_thermal_state(
+            tctl_c=99.0, cpu_pct=99.0, current_mhz=1400, max_mhz=2900, package_watts=45.0
+        )
+        self.assertEqual(hot["level"], "throttle")
+        self.assertIn("ТРОТТЛИНГ", hot["label"])
+
+        ok = mod.assess_thermal_state(
+            tctl_c=55.0, cpu_pct=10.0, current_mhz=1400, max_mhz=2900
+        )
+        self.assertEqual(ok["level"], "ok")
+
+    def test_extract_cpu_tctl(self):
+        sensors = {
+            "normalized": {
+                "temperatures": [
+                    {"label": "Composite", "value_c": 50.0, "chip": "nvme"},
+                    {"label": "Tctl", "value_c": 81.5, "chip": "k10temp-pci-00c3"},
+                ]
+            }
+        }
+        self.assertEqual(mod._extract_cpu_tctl(sensors), 81.5)
+
         zone = {"max_energy_range_uj": 10_000_000_000, "_prev_energy_uj": 9_999_000_000}
         watts = mod._energy_delta_w(zone, 500_000_000, 1.0)
         self.assertIsNotNone(watts)
