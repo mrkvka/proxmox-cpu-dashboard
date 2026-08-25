@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.6.1] — 2026-08-25
+
+### CPU load in Hardware + Guests
+
+- Группа **CPU**: строки **Load average** (1/5/15) и **Utilization** (% busy из `/proc/stat`)
+- Вкладка **Guests**: chip **CPU %** в верхней полоске узла
+- Кэш `/var/cache/pve-hw-dashboard/cpu_stat.json` для live-опросов (общий для collector и `/hwguests`)
+
+## [3.6.0] — 2026-07-15
+
+### Guests dashboard tab
+
+- New node tab **Guests** (Pulse-style): VM/LXC table with CPU/MEM/DISK bars, uptime, live net/IO rates
+- `GET /nodes/{node}/hwguests` — unified guest list from `PVE::QemuServer::vmstatus` + `PVE::LXC::vmstatus` plus node strip (load/RAM/uptime)
+- Filters: type (All/VM/LXC), status (All/Running/Stopped), name/ID search
+- Double-click a guest to open the stock Proxmox guest view
+
 ## [3.5.5] — 2026-06-19
 
 ### Fix — power estimates and UI clarity
